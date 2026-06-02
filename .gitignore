@@ -1,0 +1,18 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+.env
+
+# Local data (generated SQLite dbs, Spider downloads, eval/loop artifacts)
+data/*.db
+data/spider/
+data/eval_runs/
+data/configs/
+data/improve_log.json

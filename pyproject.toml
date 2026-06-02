@@ -1,0 +1,17 @@
+[project]
+name = "rapid-agent"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "arize-phoenix>=16.3.0",
+    "google-adk>=2.1.0",
+    "google-genai>=1.75.0",
+    "openinference-instrumentation-google-adk>=0.1.15",
+    "openinference-instrumentation-google-genai>=1.0.2",
+]
+
+[[tool.uv.index]]
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
