@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
-from sqloop.eval import execution_match
+from sqloop.eval import execution_match, wilson_ci
 from sqloop.instrumentation import flush_tracing, setup_tracing
 from sqloop.spider import db_path_for, dev_examples
 from sqloop.throttle import backoff_seconds, is_retryable
@@ -68,12 +68,15 @@ async def main_async(n: int) -> None:
 
     correct = sum(r["correct"] for r in rows)
     acc = correct / len(rows) if rows else 0.0
-    print(f"\n=== baseline execution accuracy: {correct}/{len(rows)} = {acc:.1%} ===")
+    lo, hi = wilson_ci(correct, len(rows))
+    print(f"\n=== baseline execution accuracy: {correct}/{len(rows)} = {acc:.1%} "
+          f"(95% CI {lo:.1%}-{hi:.1%}) ===")
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     out_path = RESULTS_DIR / f"baseline_n{len(rows)}_{int(time.time())}.json"
     out_path.write_text(json.dumps(
-        {"n": len(rows), "correct": correct, "accuracy": acc, "rows": rows},
+        {"n": len(rows), "correct": correct, "accuracy": acc,
+         "ci_lo": lo, "ci_hi": hi, "rows": rows},
         ensure_ascii=False, indent=2))
     print(f"saved: {out_path}")
 

@@ -69,50 +69,92 @@ def _deterministic_rules() -> str:
     )
 
 
-async def _llm_rewrite_prompt(base_prompt: str, failures: list[dict]) -> str:
-    """One LLM call: rewrite the generator prompt to address real failures."""
+async def _proposer_complete(prompt: str) -> str:
+    """Single LLM completion for the proposer, on the active backend.
+
+    DeepSeek (dev validation) avoids the proxy; Gemini is the default/submission.
+    """
+    if os.environ.get("LLM_BACKEND", "gemini").lower() == "deepseek":
+        import litellm
+
+        model = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-pro")
+        resp = await litellm.acompletion(
+            model=f"openai/{model}",
+            api_base="https://api.deepseek.com",
+            api_key=os.environ["DEEPSEEK_API_KEY"],
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+        )
+        return resp.choices[0].message.content or ""
     from google import genai
 
+    client = genai.Client()
+    resp = await client.aio.models.generate_content(model=_PROPOSER_MODEL, contents=prompt)
+    return resp.text or ""
+
+
+async def _llm_reflective_guidance(failures: list[dict]) -> str:
+    """One LLM call: a SHORT additive 'guidance' block reflecting on real failures.
+
+    GEPA-style reflection, but ADDITIVE (appended to the proven base prompt) rather
+    than a full rewrite -- a full rewrite regressed 80%->68% in an earlier round.
+    """
     fail_text = "\n".join(
-        f"- Q: {f['question']}\n  gold: {f['gold_sql']}\n  pred: {f['pred_sql']}"
+        f"- Q: {f['question']}\n  gold: {f['gold_sql']}\n  pred: {f['pred_sql'] or '(empty)'}"
         for f in failures[:8]
     )
     meta = (
-        "You improve the system prompt of a text-to-SQL generator. Below is the CURRENT "
-        "prompt, then real FAILURES (the question, the correct gold SQL, and the wrong "
-        "predicted SQL).\n\n"
-        "Rewrite the prompt so the generator would avoid these mistakes. Keep it concise. "
-        "You MUST keep the literal placeholders {intent} and {schema} exactly where they "
-        "make sense. Output ONLY the new prompt text, nothing else.\n\n"
-        f"=== CURRENT PROMPT ===\n{base_prompt}\n\n=== FAILURES ===\n{fail_text}\n"
+        "You tune a text-to-SQL generator. Below are real FAILURES (question, correct "
+        "gold SQL, wrong predicted SQL). Write a SHORT block of 3-6 concrete bullet rules "
+        "that would prevent these specific mistakes. Output ONLY the bullets, no preamble. "
+        "Do NOT use the characters '{' or '}'.\n\n"
+        f"=== FAILURES ===\n{fail_text}\n"
     )
-    client = genai.Client()
-    resp = await client.aio.models.generate_content(model=_PROPOSER_MODEL, contents=meta)
-    return (resp.text or "").strip()
+    bullets = (await _proposer_complete(meta)).strip()
+    if not bullets or "{" in bullets:
+        return ""
+    return "\n\nAdditional guidance (learned from past failures):\n" + bullets
 
 
-async def propose_candidate(rows: list[dict], k: int = 4, use_llm: bool = True) -> GeneratorConfig:
-    """Build a candidate GeneratorConfig from eval rows (few-shots + improved prompt)."""
-    base = SQL_GENERATOR_INSTRUCTION
-    few = mine_few_shots(rows, k)
+_RULES_MARKER = "Common mistakes to avoid"
+
+
+async def propose_candidates(
+    rows: list[dict], incumbent: GeneratorConfig | None = None, k: int = 4, use_llm: bool = True
+) -> list[GeneratorConfig]:
+    """Generate a diverse POOL of candidate configs (GEPA/MIPRO style).
+
+    Candidates EXTEND the incumbent (the current best config), additively -- never a
+    full rewrite (that regressed 80%->68%). Across rounds the incumbent accumulates
+    few-shots/guidance, so the loop keeps building on what already works. The caller
+    ranks candidates on a validation set and keeps the best (see sqloop/loop.py).
+
+    `rows` are the incumbent's current eval rows: successes seed new few-shots,
+    failures seed the reflective guidance.
+    """
+    if incumbent is None:
+        incumbent = GeneratorConfig(prompt=SQL_GENERATOR_INSTRUCTION, few_shots=[], version="v0")
+    base_prompt = incumbent.prompt
+
+    # New few-shots from current successes, excluding ones the incumbent already has.
+    have = {fs["question"] for fs in incumbent.few_shots}
+    mined = [fs for fs in mine_few_shots(rows, k * 2) if fs["question"] not in have][:k]
+    few = incumbent.few_shots + mined
     failures = [r for r in rows if not r.get("correct")]
-    note = f"mined {len(few)} few-shots; "
 
-    prompt = base
+    candidates = [
+        GeneratorConfig(prompt=base_prompt, few_shots=few, version="demos",
+                        notes=f"+{len(mined)} few-shots (MIPRO-style demos)"),
+    ]
+    if _RULES_MARKER not in base_prompt:  # don't append the rules block twice
+        candidates.append(GeneratorConfig(prompt=base_prompt + _deterministic_rules(), few_shots=few,
+                          version="rules", notes=f"+{len(mined)} few-shots + deterministic rules"))
     if use_llm and failures:
         try:
-            rewritten = await _llm_rewrite_prompt(base, failures)
-            if "{schema}" in rewritten and "{intent}" in rewritten:
-                prompt = rewritten
-                note += "prompt rewritten by LLM proposer"
-            else:  # LLM dropped placeholders -> unsafe, fall back
-                prompt = base + _deterministic_rules()
-                note += "LLM output missing placeholders -> deterministic rules"
-        except Exception as exc:  # noqa: BLE001
-            prompt = base + _deterministic_rules()
-            note += f"LLM rewrite failed ({type(exc).__name__}) -> deterministic rules"
-    else:
-        prompt = base + _deterministic_rules()
-        note += "deterministic rules"
-
-    return GeneratorConfig(prompt=prompt, few_shots=few, version="v1", notes=note)
+            block = await _llm_reflective_guidance(failures)
+            if block:
+                candidates.append(GeneratorConfig(prompt=base_prompt + block, few_shots=few,
+                                  version="reflect", notes=f"+{len(mined)} few-shots + LLM reflective guidance"))
+        except Exception:  # noqa: BLE001 - reflection is best-effort
+            pass
+    return candidates

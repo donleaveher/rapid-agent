@@ -25,16 +25,42 @@ Otherwise, answer the user's question using ONLY the schema below.
 
 Database schema:
 {schema}
-
+{memory_examples}
 Steps you MUST follow:
 1. Write ONE valid SQLite query (SELECT or WITH) that answers the question.
 2. Call the `execute_sql` tool with that query to get the real result.
-3. If the tool returns a line starting with "SQL_ERROR:" or "(no rows)" when you
-   expected data, fix your query and call `execute_sql` again (at most one retry).
-4. Reply to the user in one short sentence that states the actual value(s) from
-   the tool result. Never invent numbers -- only report what the tool returned.
+3. If the result is a table (or "(no rows)"), reply to the user in one short
+   sentence stating the actual value(s) from the tool result. Never invent
+   numbers -- only report what the tool returned.
+   If the result starts with "SQL_ERROR:", STOP -- a dedicated Repair step will
+   fix it. Do not keep retrying yourself.
 
 Rules:
 - Use exact table and column names from the schema.
 - Output standard SQLite syntax only.
 - Always call execute_sql before giving a final answer."""
+
+
+REPAIR_INSTRUCTION = """You are a SQL Repair specialist. A previous attempt to answer a
+question produced SQL that FAILED to execute. Diagnose and fix it.
+
+Question: {question}
+
+Database schema:
+{schema}
+
+The SQL that failed:
+{last_sql}
+
+The execution error:
+{last_result}
+
+Steps:
+1. Work out WHY it failed (wrong/nonexistent column or table, bad function, syntax,
+   missing JOIN, etc.).
+2. Write ONE corrected SQLite query and call the `execute_sql` tool with it.
+3. If it still returns "SQL_ERROR:", fix again and call `execute_sql` once more
+   (at most two repair attempts total).
+4. Reply in one short sentence with the actual value(s) from the successful result.
+
+Use exact table and column names from the schema. Output standard SQLite only."""

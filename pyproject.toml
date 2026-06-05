@@ -1,7 +1,7 @@
 [project]
-name = "rapid-agent"
+name = "sqloop"
 version = "0.1.0"
-description = "Add your description here"
+description = "SQLoop: a self-improving text-to-SQL agent (Google ADK + Gemini + Arize Phoenix)"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -10,6 +10,11 @@ dependencies = [
     "google-genai>=1.75.0",
     "openinference-instrumentation-google-adk>=0.1.15",
     "openinference-instrumentation-google-genai>=1.0.2",
+    "python-dotenv>=1.0",
+    "gdown>=5.2",          # download the Spider dataset
+    "litellm>=1.74",       # non-Gemini backends (DeepSeek) for dev validation
+    "gradio>=6.0",         # dashboard (app.py)
+    "pandas>=2.0",         # dashboard tables / curve
 ]
 
 [[tool.uv.index]]

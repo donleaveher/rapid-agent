@@ -1,67 +1,49 @@
-"""Day 4: run the Optimizer to produce a failure-mode report from real traces.
+"""Day 4: Optimizer produces a failure-mode report from real Phoenix experiment data.
+
+Phase 1 fetches the latest spider-dev experiment's results via the Phoenix MCP
+server; phase 2 clusters the failures with one Gemini call. The two phases are
+sequential so the MCP-server and Gemini connections never share the proxy at once.
 
 Usage:
-  uv run python run_optimizer.py                       # analyze the latest experiment
-  uv run python run_optimizer.py "baseline-v0"         # analyze a named experiment
+  uv run python run_optimizer.py
 """
 
 from __future__ import annotations
 
 import asyncio
-import secrets
-import sys
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
-from google.adk.runners import InMemoryRunner
-from google.genai import types
+from sqloop.optimizer import analyze, fetch_experiment_rows
 
-from sqloop.instrumentation import flush_tracing, setup_tracing
-from sqloop.optimizer import build_optimizer
-
-APP_NAME = "sqloop-optimizer"
+REPORTS_DIR = Path(__file__).resolve().parent / "data" / "optimizer_reports"
 
 
-async def main_async(experiment_hint: str) -> None:
-    setup_tracing()
-    agent, toolset = build_optimizer()
-    runner = InMemoryRunner(agent=agent, app_name=APP_NAME)
-    user_id, session_id = "optimizer", secrets.token_hex(8)
-    await runner.session_service.create_session(
-        app_name=APP_NAME, user_id=user_id, session_id=session_id
-    )
+async def main_async() -> None:
+    print("[phase 1] fetching experiment results via Phoenix MCP ...")
+    meta, rows = await fetch_experiment_rows()
+    nfail = sum(not r["correct"] for r in rows)
+    print(f"  dataset={meta['dataset']} experiment={meta['experiment_id']} "
+          f"runs={meta['total']} failures={nfail}")
 
-    target = f'the experiment named "{experiment_hint}"' if experiment_hint else "the most recent experiment"
-    prompt = (
-        f"Analyze {target} for the spider-dev dataset in Phoenix and produce the "
-        "failure-mode report as instructed."
-    )
-
-    final_text = ""
-    try:
-        async for event in runner.run_async(
-            user_id=user_id,
-            session_id=session_id,
-            new_message=types.Content(role="user", parts=[types.Part(text=prompt)]),
-        ):
-            if event.is_final_response() and event.content and event.content.parts:
-                final_text = "".join(p.text or "" for p in event.content.parts)
-    finally:
-        await toolset.close()
+    print("\n[phase 2] clustering failures with Gemini ...")
+    report = await analyze(meta, rows)
 
     print("\n===== Optimizer failure-mode report =====\n")
-    print(final_text or "(no report produced)")
+    print(report or "(no report produced)")
+
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    out = REPORTS_DIR / f"report_{meta['experiment_id']}_{int(time.time())}.md"
+    out.write_text(report, encoding="utf-8")
+    print(f"\nsaved report -> {out}")
 
 
 def main() -> None:
-    hint = sys.argv[1] if len(sys.argv) > 1 else ""
-    try:
-        asyncio.run(main_async(hint))
-    finally:
-        flush_tracing()
+    asyncio.run(main_async())
 
 
 if __name__ == "__main__":

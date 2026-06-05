@@ -9,6 +9,7 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import os
 import secrets
 import sys
 from pathlib import Path
@@ -18,8 +19,15 @@ from dotenv import load_dotenv
 # Load .env before importing anything that reads env (model name, Phoenix auth).
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
+from google.adk.agents.invocation_context import LlmCallsLimitExceededError
+from google.adk.agents.run_config import RunConfig
 from google.adk.runners import InMemoryRunner
 from google.genai import types
+
+# Hard cap on LLM calls per turn -- prevents any agent (incl. the repair ReAct
+# loop) from spinning forever. The prompt's "at most two attempts" is only a soft
+# hint; this is the real ceiling. Override with SQLOOP_MAX_LLM_CALLS.
+_MAX_LLM_CALLS = int(os.environ.get("SQLOOP_MAX_LLM_CALLS", "12"))
 
 from sqloop.agent import root_agent
 from sqloop.db import default_db_path
@@ -29,38 +37,63 @@ from sqloop.spider import db_path_for
 APP_NAME = "sqloop"
 
 
-async def run_turn_detailed(user_text: str, db_path: str, db_id: str = "", agent=None) -> dict:
-    """Run the pipeline once; return {"answer", "pred_sql"}.
+def _format_memory_examples(retrieved: list[dict]) -> str:
+    """Render retrieved past solutions as a few-shot block for the generator."""
+    if not retrieved:
+        return ""
+    lines = ["", "Similar past questions you solved correctly (reuse their patterns):"]
+    for r in retrieved:
+        lines.append(f"Q: {r['question']}\nSQL: {r['sql']}")
+    return "\n".join(lines) + "\n"
 
-    pred_sql is the last SQL the model passed to the execute_sql tool (the
-    prediction used for execution-accuracy scoring). Captured from the event
-    stream so we don't have to mutate tool/state code. `agent` defaults to the
-    active-config pipeline; pass a candidate pipeline for A/B testing.
+
+async def run_turn_detailed(user_text: str, db_path: str, db_id: str = "", agent=None, memory=None) -> dict:
+    """Run the pipeline once; return {"answer", "pred_sql", "source"}.
+
+    pred_sql is the last SQL the model passed to the execute_sql tool. `agent`
+    defaults to the active-config pipeline. If `memory` is given:
+      - a near-identical past question (same db) is REUSED directly (no LLM call);
+      - otherwise the most similar past solutions are injected as few-shots via
+        the {memory_examples} state slot.
+    Leakage is the caller's responsibility: only populate `memory` from training
+    examples, never from the held-out set being evaluated.
     """
+    if memory is not None:
+        reused = memory.reuse(user_text, db_id)
+        if reused:
+            return {"answer": f"(from memory) {reused}", "pred_sql": reused, "source": "memory"}
+
     setup_tracing()
+    memory_examples = _format_memory_examples(memory.retrieve(user_text, db_id) if memory else [])
     user_id, session_id = "local_user", secrets.token_hex(8)
     runner = InMemoryRunner(agent=agent or root_agent, app_name=APP_NAME)
     await runner.session_service.create_session(
         app_name=APP_NAME,
         user_id=user_id,
         session_id=session_id,
-        state={"db_path": db_path, "db_id": db_id},
+        state={"db_path": db_path, "db_id": db_id, "question": user_text,
+               "memory_examples": memory_examples},
     )
 
-    final_text, pred_sql = "", ""
-    async for event in runner.run_async(
-        user_id=user_id,
-        session_id=session_id,
-        new_message=types.Content(role="user", parts=[types.Part(text=user_text)]),
-    ):
-        if event.content and event.content.parts:
-            for part in event.content.parts:
-                fc = getattr(part, "function_call", None)
-                if fc and fc.name == "execute_sql":
-                    pred_sql = (fc.args or {}).get("sql", pred_sql)
-        if event.is_final_response() and event.content and event.content.parts:
-            final_text = "".join(p.text or "" for p in event.content.parts)
-    return {"answer": final_text, "pred_sql": pred_sql}
+    final_text, pred_sql, source = "", "", "generated"
+    try:
+        async for event in runner.run_async(
+            user_id=user_id,
+            session_id=session_id,
+            new_message=types.Content(role="user", parts=[types.Part(text=user_text)]),
+            run_config=RunConfig(max_llm_calls=_MAX_LLM_CALLS),
+        ):
+            if event.content and event.content.parts:
+                for part in event.content.parts:
+                    fc = getattr(part, "function_call", None)
+                    if fc and fc.name == "execute_sql":
+                        pred_sql = (fc.args or {}).get("sql", pred_sql)
+            if event.is_final_response() and event.content and event.content.parts:
+                final_text = "".join(p.text or "" for p in event.content.parts)
+    except LlmCallsLimitExceededError:
+        # Hit the per-turn ceiling (runaway loop guard); keep what we captured.
+        source = "capped"
+    return {"answer": final_text, "pred_sql": pred_sql, "source": source}
 
 
 async def run_turn(user_text: str, db_path: str, db_id: str = "") -> str:

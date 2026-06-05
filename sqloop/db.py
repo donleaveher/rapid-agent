@@ -48,9 +48,15 @@ def execute_sql(sql: str, tool_context: ToolContext) -> str:
       A text table (header + rows), "(no rows)" when empty, or a line that
       starts with "SQL_ERROR:" when the query fails or is not a SELECT.
     """
+    def _record(result: str) -> str:
+        # Stash the last attempt so the Repair step can read it from state.
+        tool_context.state["last_sql"] = stripped
+        tool_context.state["last_result"] = result
+        return result
+
     stripped = sql.strip().rstrip(";").strip()
     if not stripped.lower().startswith(("select", "with")):
-        return "SQL_ERROR: only SELECT/WITH queries are allowed."
+        return _record("SQL_ERROR: only SELECT/WITH queries are allowed.")
 
     db_path = tool_context.state.get("db_path") or str(default_db_path())
     conn = sqlite3.connect(db_path)
@@ -58,15 +64,15 @@ def execute_sql(sql: str, tool_context: ToolContext) -> str:
         cur = conn.execute(stripped)
         cols = [d[0] for d in cur.description] if cur.description else []
         rows = cur.fetchall()
-    except Exception as exc:  # surfaced to the agent so it can repair
-        return f"SQL_ERROR: {exc}"
+    except Exception as exc:  # surfaced so the Repair step can fix it
+        return _record(f"SQL_ERROR: {exc}")
     finally:
         conn.close()
 
     if not rows:
-        return "(no rows)"
+        return _record("(no rows)")
 
     header = " | ".join(cols)
     body = "\n".join(" | ".join(str(v) for v in row) for row in rows[:50])
     suffix = f"\n... ({len(rows)} rows total)" if len(rows) > 50 else ""
-    return f"{header}\n{body}{suffix}"
+    return _record(f"{header}\n{body}{suffix}")

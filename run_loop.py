@@ -1,0 +1,130 @@
+"""Day 6: run N self-improvement rounds and produce a rising accuracy curve.
+
+Each round's incumbent is the previous round's committed config (round 0 = the
+baseline). Every round is scored on the SAME held-out slice, so the points are
+comparable. We only commit improvements, so the curve is monotonic non-decreasing
+("a round that doesn't beat the incumbent keeps the incumbent").
+
+Slices (all concert_singer, mutually disjoint, no leakage):
+  reflect    = dev [0:R)     (incumbent's current failures -> propose)
+  validation = dev [R:R+V)   (rank candidates)
+  held-out   = dev [R+V:45)  (the curve; commit decision)
+
+Writes:
+  data/configs/active.json   -- the final best config
+  data/improve_log.json      -- per-round detail
+  data/curve.json            -- [{round, held_out_acc, committed, selected}] for the dashboard
+
+Usage:
+  uv run python run_loop.py            # 3 rounds, default slices
+  uv run python run_loop.py 2 --tiny   # 2 rounds, tiny slices (cheap smoke)
+  uv run python run_loop.py 3 --no-llm # no LLM reflective candidate
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import random
+import sys
+import time
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parent / ".env")
+
+from sqloop.config import ACTIVE_PATH, baseline_config
+from sqloop.eval import wilson_ci
+from sqloop.instrumentation import flush_tracing, setup_tracing
+from sqloop.loop import eval_accuracy, run_round
+from sqloop.spider import dev_examples
+
+
+def _point(rnd: int, acc: float, n: int, committed: bool, selected: str) -> dict:
+    lo, hi = wilson_ci(round(acc * n), n)
+    return {"round": rnd, "held_out_acc": round(acc, 4), "n": n,
+            "ci_lo": round(lo, 4), "ci_hi": round(hi, 4),
+            "committed": committed, "selected": selected}
+
+DATA = Path(__file__).resolve().parent / "data"
+IMPROVE_LOG = DATA / "improve_log.json"
+CURVE = DATA / "curve.json"
+
+# (reflect_n, validation_n, held_n), disjoint.
+#  tiny/full  -> single db (concert_singer, 45 examples)
+#  multidb    -> sampled across all 20 dev dbs; large held-out averages out noise
+#               and improvements come from transferable rules/guidance, not db-specific
+#               few-shots. Pair with DeepSeek (SQLOOP_EVAL_CONCURRENCY>1, gap 0).
+PRESETS = {"tiny": (6, 6, 10), "full": (15, 10, 20), "multidb": (40, 30, 100)}
+
+
+def _slices(reflect_n: int, val_n: int, held_n: int, multidb: bool):
+    if multidb:
+        ex = list(dev_examples())  # all 1034 across 20 dbs
+    else:
+        # Spider orders concert_singer by difficulty (easy counts first, joins later);
+        # shuffle so reflect/val/held each get a mix of easy and hard questions.
+        ex = dev_examples()[:45]
+    random.Random(13).shuffle(ex)
+    reflect = ex[:reflect_n]
+    val = ex[reflect_n:reflect_n + val_n]
+    held = ex[reflect_n + val_n:reflect_n + val_n + held_n]
+    return reflect, val, held
+
+
+async def main_async(rounds: int, use_llm: bool, preset: str) -> None:
+    setup_tracing()
+    reflect, val, held = _slices(*PRESETS[preset], multidb=(preset == "multidb"))
+    n_dbs = len({e["db_id"] for e in reflect + val + held})
+    print(f"preset={preset} | reflect={len(reflect)} val={len(val)} held-out={len(held)} "
+          f"| dbs={n_dbs} | rounds={rounds}")
+
+    incumbent = baseline_config()
+    held_acc = await eval_accuracy(incumbent, held)
+    lo, hi = wilson_ci(round(held_acc * len(held)), len(held))
+    print(f"\n[round 0] baseline held-out accuracy = {held_acc:.1%}  (95% CI {lo:.0%}-{hi:.0%})")
+    curve = [_point(0, held_acc, len(held), True, "baseline")]
+    rounds_log = []
+
+    for r in range(1, rounds + 1):
+        print(f"\n===== round {r} =====")
+        res = await run_round(
+            incumbent, reflect_examples=reflect, val_examples=val, held_examples=held,
+            incumbent_held_acc=held_acc, use_llm=use_llm,
+        )
+        print(f"  reflect acc={res['reflect_acc']:.1%} | validation={res['validation']} "
+              f"-> selected {res['selected']}")
+        print(f"  held-out: incumbent {res['incumbent_held_acc']:.1%} vs candidate "
+              f"{res['candidate_held_acc']:.1%} -> {'COMMIT' if res['committed'] else 'keep'}")
+        incumbent = res["new_incumbent"]
+        held_acc = res["new_held_acc"]
+        curve.append(_point(r, held_acc, len(held), res["committed"], res["selected"]))
+        rounds_log.append({"round": r, **{k: res[k] for k in
+                          ("reflect_acc", "validation", "selected", "incumbent_held_acc",
+                           "candidate_held_acc", "committed", "notes")}, "ts": int(time.time())})
+
+    incumbent.save(ACTIVE_PATH)
+    DATA.mkdir(parents=True, exist_ok=True)
+    IMPROVE_LOG.write_text(json.dumps(rounds_log, ensure_ascii=False, indent=2))
+    CURVE.write_text(json.dumps(curve, ensure_ascii=False, indent=2))
+
+    pts = " -> ".join(f"r{p['round']}:{p['held_out_acc']:.0%}" for p in curve)
+    print(f"\n=== accuracy curve (held-out) ===\n{pts}")
+    print(f"final config: {incumbent.version} ({len(incumbent.few_shots)} few-shots) -> {ACTIVE_PATH}")
+    print(f"curve -> {CURVE}")
+
+
+def main() -> None:
+    args = [a for a in sys.argv[1:]]
+    rounds = next((int(a) for a in args if a.isdigit()), 3)
+    use_llm = "--no-llm" not in args
+    preset = "tiny" if "--tiny" in args else ("multidb" if "--multidb" in args else "full")
+    try:
+        asyncio.run(main_async(rounds, use_llm, preset))
+    finally:
+        flush_tracing()
+
+
+if __name__ == "__main__":
+    main()
