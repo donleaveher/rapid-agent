@@ -155,10 +155,30 @@ async def main_async(rounds: int, use_llm: bool, preset: str) -> None:
     IMPROVE_LOG.write_text(json.dumps(rounds_log, ensure_ascii=False, indent=2))
     CURVE.write_text(json.dumps(curve, ensure_ascii=False, indent=2))
 
+    # Provenance stamp (#7): active.json / curve.json / improve_log.json are written
+    # together here, so a single run is self-consistent. The earlier mismatch
+    # (flash curve vs pro config) came from manually juggling files across separate
+    # runs -- this records which run produced the current artifacts so any such
+    # mismatch is detectable. Comparison runs should use side paths, not these.
+    backend = os.environ.get("LLM_BACKEND", "gemini").lower()
+    meta = {
+        "ts": int(time.time()),
+        "backend": backend,
+        "model": (os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-pro") if backend == "deepseek"
+                  else os.environ.get("GEMINI_MODEL", "gemini-flash-lite-latest")),
+        "preset": preset, "rounds": rounds, "seed": 13,
+        "router": os.environ.get("SQLOOP_ROUTER", "llm"),
+        "commit_rule": rounds_log[-1]["commit_rule"] if rounds_log else "n/a",
+        "n_held": len(held), "dbs": n_dbs,
+        "final_version": incumbent.version, "final_few_shots": len(incumbent.few_shots),
+        "curve": [p["held_out_acc"] for p in curve],
+    }
+    (DATA / "run_meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+
     pts = " -> ".join(f"r{p['round']}:{p['held_out_acc']:.0%}" for p in curve)
     print(f"\n=== accuracy curve (held-out) ===\n{pts}")
     print(f"final config: {incumbent.version} ({len(incumbent.few_shots)} few-shots) -> {ACTIVE_PATH}")
-    print(f"curve -> {CURVE}")
+    print(f"curve -> {CURVE} | provenance -> {DATA / 'run_meta.json'}")
 
 
 def main() -> None:

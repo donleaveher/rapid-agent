@@ -143,21 +143,27 @@
 - **位置**：`run_loop.py` 每次覆盖 `active.json`/`curve.json`/`improve_log.json` 三个固定路径；
   强弱对照时 flash/pro 各跑一次导致错位。
 - **建议**：提交前用**同一次跑**统一三个产物（或 dashboard 明确标注两条线各对应哪套 config）。
-- **状态**：⬜ 未开始。
+- **状态**：🟡 缓解 + 文档化。`run_loop` 一次性同时写 active/curve/improve_log，单次跑本就自洽；
+  之前错位是**手动挪文件**（flash/pro 对照）所致，非代码 bug。新增**溯源标记** `data/run_meta.json`
+  （backend/model/preset/seed/commit_rule/n_held/dbs/曲线），任何产物都能查到出自哪次跑；
+  已 gitignore。**操作纪律**：对照跑用侧路径（如 `curve.report.json`），不要覆盖正式三件套。
 
 ### #8 `_cols_match` 超 5 列按原序比，宽结果会假阴
 
 - **问题**：列数 > `_MAX_PERM_COLS`(5) 时不做列排列、直接按原序比，宽结果集若列序不同会假阴性。
 - **位置**：`sqloop/eval.py:69`。
 - **建议**：Spider 少见宽结果，可暂留；若要修，可对宽结果改用"按列内容多重集匹配"而非全排列（避免阶乘爆炸）。
-- **状态**：⬜ 未开始（已知即可）。
+- **状态**：✅ 已完成。有序结果（gold 含 ORDER BY）改用**列向量多重集匹配**——精确且 O(列×行)，
+  宽结果不再假阴；无序结果保留小列全排列、超宽走保守原序比（只会假阴、绝不假阳→不虚高准确率）。
+  验证：6 列有序+列重排→匹配、真不同→不匹配、无序假阳反例→不假阳。
 
 ### #9 eval 每次比较都重新执行 gold SQL
 
 - **问题**：held 集每轮被多次评测，gold 结果集每次重算，浪费。
 - **位置**：`sqloop/eval.py::execution_match` → `_run_sql(db_path, gold_sql)` 每次调用都执行。
 - **建议**：按 `(db_path, gold_sql)` 缓存 gold 结果集，小幅提速。注意只读、结果可安全缓存。
-- **状态**：⬜ 未开始。
+- **状态**：✅ 已完成。`eval.py::_run_gold_cached`（`lru_cache` 按 `(db_path, gold_sql)`），
+  held 集跨轮多次评测时 gold 只执行一次（eval 库只读，缓存安全）。验证缓存命中正常。
 
 ### #10 memory.reuse 复用 SQL 不经执行校验直接返回
 
@@ -166,7 +172,10 @@
 - **位置**：`main.py:62`（`reused = memory.reuse(...)` 直接返回）；填充在 `build_memory.py`。
 - **建议**：加护栏——如 `build_memory.py` 断言只从 train 切片填充、且与当前 held 集零交集；
   或 reuse 路径加一个轻量执行校验开关。
-- **状态**：⬜ 未开始。
+- **状态**：✅ 已完成。`Memory.assert_disjoint_from()` / `overlap_with()` 断言原语（eval 端可调用硬失败）；
+  `build_memory.py` **主动把 eval 切片（reflect/val/held）从填充池排除**（不再只靠"不同 seed"——实测
+  multidb 池仍有 5 条重叠），并对**遗留**泄漏条目告警。验证：断言正确抛错、排除后与 eval 零交集。
+  ⚠️ concert_singer dev 全部 45 题都进 eval，无可用 train 余量 → 干净 memory 需 `--multidb` 或 Spider train split。
 
 ---
 

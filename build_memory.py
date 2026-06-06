@@ -26,6 +26,7 @@ from sqloop.instrumentation import flush_tracing, setup_tracing
 from sqloop.loop import eval_rows
 from sqloop.memory import Memory
 from sqloop.spider import dev_examples
+from run_loop import PRESETS, _slices
 
 
 async def main_async(n: int, multidb: bool) -> None:
@@ -37,11 +38,32 @@ async def main_async(n: int, multidb: bool) -> None:
     else:
         examples = dev_examples()[:n]  # concert_singer train block
 
-    rows = await eval_rows(baseline_config(), examples)
+    # Leakage guard: ENFORCE (not just promise) that we never populate memory from
+    # the held-out / val / reflect slices the loop evaluates on. Different shuffle
+    # seeds alone don't guarantee disjointness -- both draw from the same pool.
+    reflect, val, held = _slices(*PRESETS["multidb" if multidb else "full"], multidb=multidb)
+    eval_keys = {(e["db_id"], e["question"]) for e in reflect + val + held}
+    before = len(examples)
+    examples = [e for e in examples if (e["db_id"], e["question"]) not in eval_keys]
+    print(f"leakage guard: excluded {before - len(examples)} examples overlapping the "
+          f"eval slices; {len(examples)} train candidates left")
+    if not examples:
+        print("  -> no disjoint training data (this preset's eval covers the whole pool); "
+              "use --multidb or a Spider train split for a leak-free memory.")
+
+    rows = await eval_rows(baseline_config(), examples) if examples else []
     mem = Memory()
     added = sum(bool(_add(mem, r)) for r in rows)
     mem.save()
     print(f"memory populated: +{added} correct solutions, total {len(mem)} -> {mem.path}")
+
+    # New additions are clean (excluded above). Surface any PRE-EXISTING leaky entries
+    # loudly (e.g. a concert_singer store built before this guard) without crashing.
+    clash = mem.overlap_with(reflect + val + held)
+    if clash:
+        print(f"⚠️  {len(clash)} pre-existing memory entries overlap the eval slices "
+              f"(leaky from before this guard). Delete {mem.path} and rebuild for a clean store. "
+              "Eval harnesses can call Memory.assert_disjoint_from() to hard-fail on this.")
 
 
 def _add(mem: Memory, row: dict) -> bool:

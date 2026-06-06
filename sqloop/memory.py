@@ -139,6 +139,26 @@ class Memory:
     def _same_db(self, db_id: str) -> list[dict]:
         return [e for e in self.entries if e["db_id"] == db_id]
 
+    def overlap_with(self, examples: list[dict]) -> list[dict]:
+        """Memory entries that collide with eval examples (same db_id + question).
+
+        reuse() returns stored SQL without re-executing it, trusting that memory was
+        built only from training data. If held-out examples ever leak into memory,
+        reuse() would silently return the gold-derived answer -> inflated accuracy.
+        This makes that detectable.
+        """
+        keys = {(e["db_id"], e["question"]) for e in examples}
+        return [e for e in self.entries if (e["db_id"], e["question"]) in keys]
+
+    def assert_disjoint_from(self, examples: list[dict], where: str = "eval set") -> None:
+        """Raise if memory overlaps `examples` (call before evaluating WITH memory)."""
+        clash = self.overlap_with(examples)
+        if clash:
+            raise ValueError(
+                f"memory leakage: {len(clash)} entries overlap the {where} "
+                f"(e.g. {clash[0]['db_id']}: {clash[0]['question'][:60]!r}). "
+                "Build memory only from data disjoint from the held-out slices.")
+
     def reuse(self, question: str, db_id: str) -> str | None:
         """Stored SQL for a near-identical past question (same db), else None."""
         best, best_sim = None, 0.0

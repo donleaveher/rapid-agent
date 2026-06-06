@@ -15,10 +15,11 @@ data/*.db
 data/spider/
 data/eval_runs/
 data/configs/
-data/improve_log.json
+data/improve_log*.json
 data/optimizer_reports/
 data/curve*.json
 data/memory.json
+data/run_meta.json
 
 # Internal dev docs (not part of the public submission)
 PROGRESS.md
