@@ -2,8 +2,8 @@
 
 Sections:
   1. Ask SQLoop  -- natural language -> generated SQL -> executed result + answer.
-  2. Self-improvement -- the rising execution-accuracy curve (flash vs pro),
-     the Optimizer's failure-mode report, and what the loop added to the prompt.
+  2. Self-improvement -- the rising execution-accuracy curve (Gemini + DeepSeek,
+     flash vs pro), the Optimizer's failure-mode report, and what the loop added.
 
 Run:
   uv run python app.py                       # uses LLM_BACKEND (default gemini)
@@ -93,8 +93,11 @@ def _load_curve(name: str, series: str) -> list[dict]:
 
 
 def curve_df() -> pd.DataFrame:
-    rows = _load_curve("curve.json", "flash (self-improving)") + \
-           _load_curve("curve.pro.json", "pro (baseline-strong)")
+    # Both backends: Gemini (submission, on Vertex) + DeepSeek (dev cross-check).
+    rows = (_load_curve("curve.vertex.json", "Gemini flash (submission)") +
+            _load_curve("curve.vertex_pro.json", "Gemini pro") +
+            _load_curve("curve.flash.json", "DeepSeek flash (dev)") +
+            _load_curve("curve.pro.json", "DeepSeek pro (dev)"))
     return pd.DataFrame(rows or [{"round": 0, "accuracy": 0, "model": "n/a"}])
 
 
@@ -155,7 +158,10 @@ with gr.Blocks(title="SQLoop") as demo:
     with gr.Tab("Self-improvement"):
         gr.Markdown("### Execution-accuracy curve (held-out, 100 questions / 20 DBs)\n"
                     "Each round: read failures → propose prompt/few-shot candidates → "
-                    "validate → commit only if better. The weak model climbs as it self-improves.")
+                    "validate → commit only if better. **Gemini** is the submission backend "
+                    "(on Vertex); **DeepSeek** is the dev cross-check. Weak models climb as they "
+                    "self-improve; a strong model already near the ceiling (Gemini pro, 87%) stays "
+                    "flat — and the commit gate honestly commits nothing rather than faking a rise.")
         gr.LinePlot(curve_df, x="round", y="accuracy", color="model",
                     x_title="self-improvement round", y_title="execution accuracy (%)",
                     height=360, every=None)
