@@ -108,7 +108,12 @@
   - 复用 `memory.py` 已有的可插拔 dense ranker / reranker 钩子（`set_dense_ranker`/`set_reranker`）做语义匹配；
   - 或至少把列的**样本值**纳入打分（值匹配能救"artist→singer"类同义）；
   - 保持小库回退全量的现有安全网（`SQLOOP_SCHEMA_MIN_TABLES`）。
-- **状态**：⬜ 未开始。
+- **状态**：✅ 已完成。**值链接**（`schema_link.py::_value_index`）：采样各表文本列的 distinct 值并入打分，
+  问题提到某单元格值时能命中实际存它的表（`SQLOOP_SCHEMA_VALUES=on` 默认开，按 db `lru_cache`；
+  值词过滤：≥3 字符、含字母、丢纯数字年份）。**可插拔语义 ranker 钩子** `set_table_ranker`
+  （仿 memory 的 dense ranker，默认关、零依赖，插入真实 embedder 解决 artist≈singer）。
+  验证：car_1 库 "in europe" 问题，纯词法+FK 漏 `continents`、值链接补上；缓存命中；小库回退全量；
+  钩子插拔/复位正常。仅裁剪 generator 可见 schema，执行仍对全库，**不影响正确性**。
 
 ### #6 Phoenix 用得还不够深 —— 多轮曲线只落本地 json
 
