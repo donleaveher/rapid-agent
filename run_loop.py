@@ -48,11 +48,18 @@ from sqloop.optimizer import build_failure_report, latest_saved_report
 from sqloop.spider import dev_examples
 
 
-def _point(rnd: int, acc: float, n: int, committed: bool, selected: str) -> dict:
+def _avg_tokens(rows: list) -> float:
+    vals = [r.get("tokens", 0) for r in rows] if rows else []
+    return round(sum(vals) / len(vals), 1) if vals else 0.0
+
+
+def _point(rnd: int, acc: float, n: int, committed: bool, selected: str,
+           avg_tokens: float = 0.0) -> dict:
     lo, hi = wilson_ci(round(acc * n), n)
     return {"round": rnd, "held_out_acc": round(acc, 4), "n": n,
             "ci_lo": round(lo, 4), "ci_hi": round(hi, 4),
-            "committed": committed, "selected": selected}
+            "committed": committed, "selected": selected,
+            "avg_tokens_per_gen": avg_tokens}
 
 DATA = Path(__file__).resolve().parent / "data"
 IMPROVE_LOG = DATA / "improve_log.json"
@@ -108,8 +115,9 @@ async def main_async(rounds: int, use_llm: bool, preset: str) -> None:
     held_rows = await eval_rows(incumbent, held)          # keep rows for optional Phoenix log
     held_acc = accuracy(held_rows)
     lo, hi = wilson_ci(round(held_acc * len(held)), len(held))
-    print(f"\n[round 0] baseline held-out accuracy = {held_acc:.1%}  (95% CI {lo:.0%}-{hi:.0%})")
-    curve = [_point(0, held_acc, len(held), True, "baseline")]
+    print(f"\n[round 0] baseline held-out accuracy = {held_acc:.1%}  (95% CI {lo:.0%}-{hi:.0%})"
+          f"  | avg {_avg_tokens(held_rows):.0f} tokens/gen")
+    curve = [_point(0, held_acc, len(held), True, "baseline", _avg_tokens(held_rows))]
     rounds_log = []
 
     # Optional: log each round's held-out eval to Phoenix Experiments (#6), no extra
@@ -145,7 +153,8 @@ async def main_async(rounds: int, use_llm: bool, preset: str) -> None:
                 print(f"[phoenix] round {r} experiment -> {url}")
             except Exception as exc:  # noqa: BLE001
                 print(f"[phoenix] round {r} log failed: {exc}")
-        curve.append(_point(r, held_acc, len(held), res["committed"], res["selected"]))
+        curve.append(_point(r, held_acc, len(held), res["committed"], res["selected"],
+                            _avg_tokens(held_rows)))
         rounds_log.append({"round": r, **{k: res[k] for k in
                           ("reflect_acc", "validation", "selected", "incumbent_held_acc",
                            "candidate_held_acc", "committed", "commit_rule", "notes")}, "ts": int(time.time())})
@@ -172,13 +181,32 @@ async def main_async(rounds: int, use_llm: bool, preset: str) -> None:
         "n_held": len(held), "dbs": n_dbs,
         "final_version": incumbent.version, "final_few_shots": len(incumbent.few_shots),
         "curve": [p["held_out_acc"] for p in curve],
+        "avg_tokens_per_gen": [p["avg_tokens_per_gen"] for p in curve],
     }
     (DATA / "run_meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2))
 
+    # Per-question token usage for the final config's held-out generations (#token req).
+    tok_rows = sorted(
+        ({"question": r["question"], "db_id": r["db_id"],
+          "tokens": r.get("tokens", 0), "correct": r["correct"]} for r in held_rows),
+        key=lambda r: -r["tokens"])
+    tok_vals = [r["tokens"] for r in tok_rows]
+    tok_summary = {
+        "n": len(tok_vals),
+        "total_tokens": sum(tok_vals),
+        "avg_tokens_per_gen": round(sum(tok_vals) / len(tok_vals), 1) if tok_vals else 0,
+        "min": min(tok_vals) if tok_vals else 0,
+        "max": max(tok_vals) if tok_vals else 0,
+        "per_question": tok_rows,
+    }
+    (DATA / "tokens.json").write_text(json.dumps(tok_summary, ensure_ascii=False, indent=2))
+
     pts = " -> ".join(f"r{p['round']}:{p['held_out_acc']:.0%}" for p in curve)
     print(f"\n=== accuracy curve (held-out) ===\n{pts}")
+    toks = " -> ".join(f"r{p['round']}:{p['avg_tokens_per_gen']:.0f}" for p in curve)
+    print(f"=== avg tokens/generation (held-out) ===\n{toks}")
     print(f"final config: {incumbent.version} ({len(incumbent.few_shots)} few-shots) -> {ACTIVE_PATH}")
-    print(f"curve -> {CURVE} | provenance -> {DATA / 'run_meta.json'}")
+    print(f"curve -> {CURVE} | provenance -> {DATA / 'run_meta.json'} | tokens -> {DATA / 'tokens.json'}")
 
 
 def main() -> None:

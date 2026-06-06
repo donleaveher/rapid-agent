@@ -20,6 +20,7 @@ data/optimizer_reports/
 data/curve*.json
 data/memory.json
 data/run_meta.json
+data/tokens.json
 
 # Internal dev docs (not part of the public submission)
 PROGRESS.md

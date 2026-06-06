@@ -37,11 +37,12 @@ RETRIES = 5
 async def _eval_one(agent, ex: dict) -> dict:
     db_id, gold = ex["db_id"], ex["query"]
     db_path = str(db_path_for(db_id))
-    pred = ""
+    pred, tokens = "", 0
     for attempt in range(RETRIES):
         try:
             res = await run_turn_detailed(ex["question"], db_path, db_id, agent=agent)
             pred = res["pred_sql"]
+            tokens = (res.get("tokens") or {}).get("total", 0)  # tokens for this SQL generation
             break
         except Exception as exc:  # noqa: BLE001
             if is_retryable(str(exc)) and attempt < RETRIES - 1:
@@ -49,7 +50,7 @@ async def _eval_one(agent, ex: dict) -> dict:
                 continue
             break  # counts as wrong (pred stays "")
     return {"question": ex["question"], "db_id": db_id, "gold_sql": gold, "pred_sql": pred,
-            "correct": execution_match(pred, gold, db_path)}
+            "correct": execution_match(pred, gold, db_path), "tokens": tokens}
 
 
 async def eval_rows(config: GeneratorConfig, examples: list[dict]) -> list[dict]:

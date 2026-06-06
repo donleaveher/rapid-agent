@@ -58,10 +58,12 @@ async def run_turn_detailed(user_text: str, db_path: str, db_id: str = "", agent
     Leakage is the caller's responsibility: only populate `memory` from training
     examples, never from the held-out set being evaluated.
     """
+    zero_tokens = {"prompt": 0, "completion": 0, "total": 0, "by_agent": {}}
     if memory is not None:
         reused = memory.reuse(user_text, db_id)
-        if reused:
-            return {"answer": f"(from memory) {reused}", "pred_sql": reused, "source": "memory"}
+        if reused:  # reuse skips all LLM calls -> zero tokens
+            return {"answer": f"(from memory) {reused}", "pred_sql": reused,
+                    "source": "memory", "tokens": zero_tokens}
 
     setup_tracing()
     memory_examples = _format_memory_examples(memory.retrieve(user_text, db_id) if memory else [])
@@ -76,6 +78,7 @@ async def run_turn_detailed(user_text: str, db_path: str, db_id: str = "", agent
     )
 
     final_text, pred_sql, source = "", "", "generated"
+    tokens = {"prompt": 0, "completion": 0, "total": 0, "by_agent": {}}
     try:
         async for event in runner.run_async(
             user_id=user_id,
@@ -83,6 +86,16 @@ async def run_turn_detailed(user_text: str, db_path: str, db_id: str = "", agent
             new_message=types.Content(role="user", parts=[types.Part(text=user_text)]),
             run_config=RunConfig(max_llm_calls=_MAX_LLM_CALLS),
         ):
+            um = getattr(event, "usage_metadata", None)
+            if um is not None:  # per-LLM-call token usage (Gemini + DeepSeek/LiteLlm)
+                p = getattr(um, "prompt_token_count", 0) or 0
+                c = getattr(um, "candidates_token_count", 0) or 0
+                t = getattr(um, "total_token_count", 0) or 0
+                tokens["prompt"] += p
+                tokens["completion"] += c
+                tokens["total"] += t
+                a = event.author or "?"
+                tokens["by_agent"][a] = tokens["by_agent"].get(a, 0) + t
             if event.content and event.content.parts:
                 for part in event.content.parts:
                     fc = getattr(part, "function_call", None)
@@ -93,7 +106,7 @@ async def run_turn_detailed(user_text: str, db_path: str, db_id: str = "", agent
     except LlmCallsLimitExceededError:
         # Hit the per-turn ceiling (runaway loop guard); keep what we captured.
         source = "capped"
-    return {"answer": final_text, "pred_sql": pred_sql, "source": source}
+    return {"answer": final_text, "pred_sql": pred_sql, "source": source, "tokens": tokens}
 
 
 async def run_turn(user_text: str, db_path: str, db_id: str = "") -> str:
