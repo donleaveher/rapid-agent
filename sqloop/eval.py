@@ -15,6 +15,7 @@ self-improvement curve can be reported with error bars instead of bare points.
 
 from __future__ import annotations
 
+import functools
 import math
 import sqlite3
 from itertools import permutations
@@ -35,6 +36,14 @@ def _run_sql(db_path: str | Path, sql: str) -> tuple[bool, list[tuple]]:
         return False, []
     finally:
         conn.close()
+
+
+@functools.lru_cache(maxsize=4096)
+def _run_gold_cached(db_path: str, gold_sql: str) -> tuple:
+    """Gold is fixed per example but re-run on every comparison (the held set is
+    evaluated many times across rounds), so cache it. Safe: eval DBs are read-only."""
+    ok, rows = _run_sql(db_path, gold_sql)
+    return ok, tuple(rows)
 
 
 def _cell(v):
@@ -63,21 +72,34 @@ def _cols_match(pred: list[tuple], gold: list[tuple], order_matters: bool) -> bo
     if any(len(r) != ncols for r in pred):
         return False
 
-    def eq(a: list[tuple], b: list[tuple]) -> bool:
-        return a == b if order_matters else sorted(a, key=repr) == sorted(b, key=repr)
+    if order_matters:
+        # Rows are positionally fixed, so each column is a fixed vector. A column
+        # permutation reproduces gold iff the multisets of column-vectors match --
+        # exact and O(ncols*nrows), so WIDE results no longer false-negative (the
+        # old as-is compare for ncols>5 was column-order-sensitive).
+        pcols = sorted((tuple(r[i] for r in pred) for i in range(ncols)), key=repr)
+        gcols = sorted((tuple(r[i] for r in gold) for i in range(ncols)), key=repr)
+        return pcols == gcols
 
-    if ncols > _MAX_PERM_COLS:  # too many columns to permute; compare as-is
-        return eq(pred, gold)
+    # Unordered rows: need a genuine column permutation (the column-vector multiset
+    # is unsafe here -- it can false-POSITIVE). Permute for small ncols; for very
+    # wide results fall back to the conservative as-is compare (rare in Spider, and
+    # it only ever false-negatives, never inflates accuracy).
+    def eq_unordered(a, b):
+        return sorted(a, key=repr) == sorted(b, key=repr)
+
+    if ncols > _MAX_PERM_COLS:
+        return eq_unordered(pred, gold)
     for perm in permutations(range(ncols)):
         permuted = [tuple(r[i] for i in perm) for r in pred]
-        if eq(permuted, gold):
+        if eq_unordered(permuted, gold):
             return True
     return False
 
 
 def execution_match(pred_sql: str, gold_sql: str, db_path: str | Path) -> bool:
     """True iff predicted SQL runs and yields the same result set as gold SQL."""
-    ok_gold, gold_rows = _run_sql(db_path, gold_sql)
+    ok_gold, gold_rows = _run_gold_cached(str(db_path), gold_sql)  # cached (#9)
     if not ok_gold:
         return False  # gold should always run; non-scorable -> False
     ok_pred, pred_rows = _run_sql(db_path, pred_sql)
