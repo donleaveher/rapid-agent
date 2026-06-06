@@ -17,11 +17,16 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from pathlib import Path
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 _MODEL = os.environ.get("OPTIMIZER_MODEL", os.environ.get("GEMINI_MODEL", "gemini-flash-lite-latest"))
+
+# Where run_optimizer.py saves the MCP-derived failure-mode reports. Owned here so
+# both the writer (run_optimizer.py) and the reader (the improvement loop) agree.
+REPORTS_DIR = Path(__file__).resolve().parent.parent / "data" / "optimizer_reports"
 
 
 def _mcp_server_params() -> StdioServerParameters:
@@ -153,3 +158,70 @@ async def analyze(meta: dict, rows: list[dict]) -> str:
     client = genai.Client()
     resp = await client.aio.models.generate_content(model=_MODEL, contents=prompt)
     return (resp.text or "").strip()
+
+
+# ---- Bridge: feed the MCP-derived diagnosis INTO the improvement loop -------
+# Without this, the Optimizer's report was a dead-end .md file. These let
+# sqloop/loop.py consume it so trace-introspection actually drives the prompt
+# revision (closing the self-improvement loop the project claims).
+
+def latest_saved_report() -> str | None:
+    """Text of the most recent failure-mode report (offline path), or None.
+
+    run_optimizer.py reads the agent's OWN traces via Phoenix MCP and writes a
+    report into REPORTS_DIR; the loop reads the latest one. This is the robust,
+    network-free way the MCP diagnosis reaches propose().
+    """
+    if not REPORTS_DIR.exists():
+        return None
+    files = sorted(REPORTS_DIR.glob("report_*.md"),
+                   key=lambda p: p.stat().st_mtime, reverse=True)
+    return files[0].read_text(encoding="utf-8") if files else None
+
+
+def distill_report(report: str, max_chars: int | None = None) -> str:
+    """Compress a failure-mode report to its high-signal, still-relevant parts.
+
+    Keeps the Summary line, the clustered mode HEADERS (### MODE — count) and the
+    Suggested fixes; drops the per-example Q/gold/pred/why dumps. Those dumps are
+    (a) redundant -- the reflection prompt already passes the CURRENT failures
+    separately -- and (b) stale, since a saved report is from a past experiment.
+    The result is a few hundred chars instead of a few KB, so injecting it into the
+    proposer call costs far fewer tokens while keeping the transferable diagnosis.
+
+    max_chars (env SQLOOP_REPORT_MAX_CHARS, default 1200) is a hard safety cap;
+    truncation snaps back to a line boundary so a fix bullet is never half-cut.
+    """
+    if not report:
+        return ""
+    if max_chars is None:
+        max_chars = int(os.environ.get("SQLOOP_REPORT_MAX_CHARS", "1200"))
+    out, section = [], None
+    for line in report.splitlines():
+        s = line.strip()
+        if s.startswith("## "):
+            section = s.lower()
+            out.append(line)
+        elif s.startswith("### "):          # failure-mode header + count: keep
+            out.append(line)
+        elif section and ("summary" in section or "suggested fixes" in section):
+            if s:                            # keep summary line + fix bullets
+                out.append(line)
+        # else: under "Failure modes" -> per-example dump -> drop
+    distilled = "\n".join(out).strip()
+    if len(distilled) > max_chars:          # snap back to last whole line
+        distilled = distilled[:max_chars].rsplit("\n", 1)[0].rstrip()
+    return distilled
+
+
+async def build_failure_report(dataset_prefix: str = "spider-dev") -> str | None:
+    """Live path: read own traces via Phoenix MCP, cluster, return the report.
+
+    Best-effort -- returns None if Phoenix/MCP is unreachable, so the loop still
+    runs offline. Used by run_loop when SQLOOP_OPTIMIZER_LIVE=1.
+    """
+    try:
+        meta, rows = await fetch_experiment_rows(dataset_prefix)
+        return await analyze(meta, rows)
+    except Exception:  # noqa: BLE001 - introspection is best-effort
+        return None

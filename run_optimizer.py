@@ -18,9 +18,7 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
-from sqloop.optimizer import analyze, fetch_experiment_rows
-
-REPORTS_DIR = Path(__file__).resolve().parent / "data" / "optimizer_reports"
+from sqloop.optimizer import REPORTS_DIR, analyze, fetch_experiment_rows
 
 
 async def main_async() -> None:

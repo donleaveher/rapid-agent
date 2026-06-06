@@ -25,18 +25,19 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 from sqloop.config import ACTIVE_PATH, active_config
 from sqloop.instrumentation import flush_tracing, setup_tracing
 from sqloop.loop import run_round
-from run_loop import IMPROVE_LOG, PRESETS, _slices
+from run_loop import IMPROVE_LOG, PRESETS, _load_failure_report, _slices
 
 
 async def main_async(use_llm: bool, preset: str) -> None:
     setup_tracing()
+    failure_report = await _load_failure_report()
     incumbent = active_config()
     reflect, val, held = _slices(*PRESETS[preset], multidb=(preset == "multidb"))
     print(f"incumbent={incumbent.version} ({len(incumbent.few_shots)} few-shots) | "
           f"reflect={len(reflect)} val={len(val)} held-out={len(held)}")
 
     res = await run_round(incumbent, reflect_examples=reflect, val_examples=val,
-                          held_examples=held, use_llm=use_llm)
+                          held_examples=held, use_llm=use_llm, failure_report=failure_report)
 
     print(f"\nvalidation={res['validation']} -> selected {res['selected']}")
     print(f"held-out: incumbent {res['incumbent_held_acc']:.1%} vs candidate "
@@ -51,7 +52,7 @@ async def main_async(use_llm: bool, preset: str) -> None:
     log = json.loads(IMPROVE_LOG.read_text()) if IMPROVE_LOG.exists() else []
     log.append({"round": len(log) + 1, **{k: res[k] for k in
                ("validation", "selected", "incumbent_held_acc", "candidate_held_acc",
-                "committed", "notes")}, "ts": int(time.time())})
+                "committed", "commit_rule", "notes")}, "ts": int(time.time())})
     IMPROVE_LOG.parent.mkdir(parents=True, exist_ok=True)
     IMPROVE_LOG.write_text(json.dumps(log, ensure_ascii=False, indent=2))
     print(f"logged -> {IMPROVE_LOG}")

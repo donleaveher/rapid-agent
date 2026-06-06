@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import random
 import sys
 import time
@@ -38,6 +39,7 @@ from sqloop.config import ACTIVE_PATH, baseline_config
 from sqloop.eval import wilson_ci
 from sqloop.instrumentation import flush_tracing, setup_tracing
 from sqloop.loop import eval_accuracy, run_round
+from sqloop.optimizer import build_failure_report, latest_saved_report
 from sqloop.spider import dev_examples
 
 
@@ -73,8 +75,25 @@ def _slices(reflect_n: int, val_n: int, held_n: int, multidb: bool):
     return reflect, val, held
 
 
+async def _load_failure_report() -> str | None:
+    """The Optimizer's MCP-derived failure-mode report that grounds the reflective
+    candidate. SQLOOP_OPTIMIZER_LIVE=1 reads the agent's own traces via Phoenix MCP
+    now; otherwise use the latest report run_optimizer.py already saved. Either way
+    None is fine -- reflection just runs unguided (previous behaviour)."""
+    report = None
+    if os.environ.get("SQLOOP_OPTIMIZER_LIVE", "0") == "1":
+        print("[optimizer] reading own traces via Phoenix MCP ...")
+        report = await build_failure_report()
+    if report is None:
+        report = latest_saved_report()
+    print(f"[optimizer] failure-mode report: "
+          f"{f'loaded ({len(report)} chars) -> grounds reflect candidate' if report else 'none -> reflect runs unguided'}")
+    return report
+
+
 async def main_async(rounds: int, use_llm: bool, preset: str) -> None:
     setup_tracing()
+    failure_report = await _load_failure_report()
     reflect, val, held = _slices(*PRESETS[preset], multidb=(preset == "multidb"))
     n_dbs = len({e["db_id"] for e in reflect + val + held})
     print(f"preset={preset} | reflect={len(reflect)} val={len(val)} held-out={len(held)} "
@@ -91,18 +110,19 @@ async def main_async(rounds: int, use_llm: bool, preset: str) -> None:
         print(f"\n===== round {r} =====")
         res = await run_round(
             incumbent, reflect_examples=reflect, val_examples=val, held_examples=held,
-            incumbent_held_acc=held_acc, use_llm=use_llm,
+            incumbent_held_acc=held_acc, use_llm=use_llm, failure_report=failure_report,
         )
         print(f"  reflect acc={res['reflect_acc']:.1%} | validation={res['validation']} "
               f"-> selected {res['selected']}")
         print(f"  held-out: incumbent {res['incumbent_held_acc']:.1%} vs candidate "
-              f"{res['candidate_held_acc']:.1%} -> {'COMMIT' if res['committed'] else 'keep'}")
+              f"{res['candidate_held_acc']:.1%} -> {'COMMIT' if res['committed'] else 'keep'} "
+              f"[gate: {res['commit_rule']}]")
         incumbent = res["new_incumbent"]
         held_acc = res["new_held_acc"]
         curve.append(_point(r, held_acc, len(held), res["committed"], res["selected"]))
         rounds_log.append({"round": r, **{k: res[k] for k in
                           ("reflect_acc", "validation", "selected", "incumbent_held_acc",
-                           "candidate_held_acc", "committed", "notes")}, "ts": int(time.time())})
+                           "candidate_held_acc", "committed", "commit_rule", "notes")}, "ts": int(time.time())})
 
     incumbent.save(ACTIVE_PATH)
     DATA.mkdir(parents=True, exist_ok=True)

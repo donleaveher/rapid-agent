@@ -96,3 +96,32 @@ def wilson_ci(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
     center = (p + z * z / (2 * n)) / denom
     half = (z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))) / denom
     return (max(0.0, center - half), min(1.0, center + half))
+
+
+def should_commit(
+    cand_acc: float, inc_acc: float, n: int, *, rule: str = "margin", min_gain: int = 3
+) -> bool:
+    """Commit gate for the self-improvement loop: is the candidate *meaningfully*
+    better than the incumbent, or just noise?
+
+    A single-point ``cand > inc`` commits on a 1-example difference (0.78 -> 0.79 at
+    n=100), which the held-out CI cannot distinguish from noise -- inconsistent with
+    reporting Wilson intervals. This gate adds a margin / significance criterion.
+
+    rule (env SQLOOP_COMMIT_RULE):
+      - "margin" (default): candidate must solve at least `min_gain` MORE held-out
+        examples (env SQLOOP_COMMIT_MIN_GAIN, default 3). Simple and explainable
+        ("3 more questions right"); auto-scales severity with n.
+      - "ci": candidate's Wilson 95% lower bound must exceed the incumbent's point
+        estimate (conservative).
+      - "strict": legacy single-point ``cand_acc > inc_acc`` (commits on noise).
+    """
+    if rule == "strict":
+        return cand_acc > inc_acc
+    cand_k, inc_k = round(cand_acc * n), round(inc_acc * n)
+    if rule == "margin":
+        return (cand_k - inc_k) >= min_gain
+    if rule == "ci":
+        lo, _ = wilson_ci(cand_k, n)
+        return lo > inc_acc
+    raise ValueError(f"unknown commit rule: {rule!r}")

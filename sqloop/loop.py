@@ -19,7 +19,7 @@ import os
 
 from sqloop.agent import build_pipeline
 from sqloop.config import GeneratorConfig
-from sqloop.eval import execution_match
+from sqloop.eval import execution_match, should_commit
 from sqloop.propose import propose_candidates
 from sqloop.spider import db_path_for
 from sqloop.throttle import backoff_seconds, is_retryable
@@ -88,10 +88,23 @@ async def run_round(
     incumbent_held_acc: float | None = None,
     use_llm: bool = True,
     k: int = 4,
+    failure_report: str | None = None,
+    mine_demos: bool | None = None,
 ) -> dict:
-    """Run one improvement round; return metrics + the (possibly new) incumbent."""
+    """Run one improvement round; return metrics + the (possibly new) incumbent.
+
+    `failure_report` (optional) is the Optimizer's failure-mode analysis, clustered
+    from the agent's own Phoenix traces via MCP; when given it grounds the reflective
+    candidate so trace-introspection actually drives the prompt revision.
+
+    `mine_demos` (default None -> env SQLOOP_PROPOSE_DEMOS) gates static success
+    few-shot mining; set False when the History Memory owns that lane, so propose
+    only contributes abstract rules/guidance (no duplicate few-shot channel).
+    """
     refl_rows = await eval_rows(incumbent, reflect_examples)
-    candidates = await propose_candidates(refl_rows, incumbent, k=k, use_llm=use_llm)
+    candidates = await propose_candidates(
+        refl_rows, incumbent, k=k, use_llm=use_llm, failure_report=failure_report,
+        mine_demos=mine_demos)
 
     ranked = []
     for c in candidates:
@@ -103,7 +116,12 @@ async def run_round(
     if incumbent_held_acc is None:
         incumbent_held_acc = await eval_accuracy(incumbent, held_examples)
     cand_held_acc = await eval_accuracy(best, held_examples)
-    committed = cand_held_acc > incumbent_held_acc
+
+    # Commit only on a meaningful gain, not single-point noise (see eval.should_commit).
+    rule = os.environ.get("SQLOOP_COMMIT_RULE", "margin")
+    min_gain = int(os.environ.get("SQLOOP_COMMIT_MIN_GAIN", "3"))
+    committed = should_commit(cand_held_acc, incumbent_held_acc, len(held_examples),
+                              rule=rule, min_gain=min_gain)
 
     return {
         "reflect_acc": accuracy(refl_rows),
@@ -112,6 +130,7 @@ async def run_round(
         "incumbent_held_acc": incumbent_held_acc,
         "candidate_held_acc": cand_held_acc,
         "committed": committed,
+        "commit_rule": f"{rule}(min_gain={min_gain})" if rule == "margin" else rule,
         "new_incumbent": best if committed else incumbent,
         "new_held_acc": cand_held_acc if committed else incumbent_held_acc,
         "notes": best.notes,
