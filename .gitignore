@@ -26,3 +26,6 @@ data/tokens*.json
 PROGRESS.md
 CLAUDE.md
 
+# Harness runtime
+.claude/scheduled_tasks.lock
+
