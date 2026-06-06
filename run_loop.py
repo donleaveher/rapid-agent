@@ -35,6 +35,10 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
+# Batch eval: every Spider question is "sql", so skip the per-question router LLM
+# call by default (#4) -- saves ~1/3 of LLM calls. Override with SQLOOP_ROUTER=llm.
+os.environ.setdefault("SQLOOP_ROUTER", "heuristic")
+
 from sqloop.config import ACTIVE_PATH, baseline_config
 from sqloop.eval import wilson_ci
 from sqloop.instrumentation import flush_tracing, setup_tracing

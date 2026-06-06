@@ -52,7 +52,11 @@
   3. 至少 +N 题的绝对增量（如 N≥3，简单可解释）；
   4. 两比例 z 检验 / Wilson 差值区间不含 0。
   推荐先上 (3) 或 (2)（实现简单、叙事清晰），暴露为 `SQLOOP_COMMIT_MARGIN`。
-- **状态**：⬜ 未开始（用户标记：可之后再做）。
+- **状态**：✅ 已完成。`eval.should_commit(rule=margin|ci|strict, min_gain)`，默认 **margin≥3 题**
+  （env `SQLOOP_COMMIT_RULE` / `SQLOOP_COMMIT_MIN_GAIN`）；`loop.run_round` 接入，
+  `run_loop`/`run_improve` 打印并记录 `commit_rule`。离线用历史曲线点验证：保留真改进(+8/+9)、
+  挡掉噪声 commit(pro r3 +1、flash r3 +1)。⚠️ **改变默认 commit 行为**——复现旧曲线用
+  `SQLOOP_COMMIT_RULE=strict`。
 
 ### #3 Repair 只在 `SQL_ERROR` 触发，但多数失败根本不报错
 
@@ -83,7 +87,10 @@
   - eval 模式下跳过 router（直接置 `state["intent"]="sql"`），用 env 如 `SQLOOP_SKIP_ROUTER=1` 控制；
   - 或把 router 降级成关键词启发式（非 LLM），serve 时仍保留意图分流能力。
   - 注意保持 Phoenix span 结构叙事（可保留一个轻量非 LLM router span）。
-- **状态**：⬜ 未开始。
+- **状态**：✅ 已完成。`sqloop/router.py::HeuristicRouter`（非 LLM 关键词分类，写 `intent`，
+  保留 `router` span）；`build_pipeline` 按 env `SQLOOP_ROUTER=llm|heuristic|skip`（默认 llm）选择；
+  `run_loop`/`run_improve` 批量 eval 默认 heuristic（`setdefault`，可用 `SQLOOP_ROUTER=llm` 覆盖）。
+  省 ~1/3 LLM 调用；eval 结果不变（Spider 全为 sql，intent 恒为 sql）。已离线 + live 验证。
 
 ### #5 Schema Linker 纯词法 Jaccard，遇生僻列名失效
 

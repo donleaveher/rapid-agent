@@ -24,6 +24,7 @@ from sqloop.config import active_config
 from sqloop.db import execute_sql
 from sqloop.prompts import REPAIR_INSTRUCTION, ROUTER_INSTRUCTION
 from sqloop.repair import RepairAgent
+from sqloop.router import HeuristicRouter
 from sqloop.schema_linker import SchemaLinker
 
 # LLM backend switch. Default = Gemini (the submission backend, runs on Vertex).
@@ -66,13 +67,20 @@ def build_pipeline(generator_instruction: str | None = None) -> SequentialAgent:
     if generator_instruction is None:
         generator_instruction = active_config().render_instruction()
 
-    router = LlmAgent(
-        model=_make_model(),
-        name="router",
-        instruction=ROUTER_INSTRUCTION,
-        output_key="intent",  # stored in session state, read by sql_generator
-        generate_content_config=_gen_config(),
-    )
+    # Router: LLM by default; heuristic (non-LLM) saves ~1/3 of per-turn LLM calls
+    # in batch eval where every question is "sql" (env SQLOOP_ROUTER=heuristic|skip).
+    # Either way it writes `intent` to state and shows as the `router` span.
+    router_mode = os.environ.get("SQLOOP_ROUTER", "llm").lower()
+    if router_mode in ("heuristic", "skip"):
+        router = HeuristicRouter(name="router")
+    else:
+        router = LlmAgent(
+            model=_make_model(),
+            name="router",
+            instruction=ROUTER_INSTRUCTION,
+            output_key="intent",  # stored in session state, read by sql_generator
+            generate_content_config=_gen_config(),
+        )
     schema_linker = SchemaLinker(name="schema_linker")
     sql_generator = LlmAgent(
         model=_make_model(),
