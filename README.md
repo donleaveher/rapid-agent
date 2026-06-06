@@ -13,24 +13,29 @@ Gemini, OpenInference tracing to Phoenix, and the Phoenix MCP server.
 
 - **A real closed loop**, not a single pass: trace → diagnose → propose → validate → commit-if-better.
 - **Deep tracing + MCP**: every Router/Schema-Linker/Generator/Executor/Repair step is a Phoenix span; the Optimizer pulls its own experiment results back *via MCP*.
-- **Evidence, not vibes**: Spider-style execution accuracy with 95% confidence intervals.
+- **Evidence, not vibes**: Spider-style execution accuracy with 95% confidence intervals, and a **significance gate** so single-point noise never gets committed.
 
-Self-improvement result (DeepSeek-flash dev validation, 100 held-out questions / 20 DBs, greedy decoding):
+Self-improvement result (DeepSeek dev validation, 100 held-out questions / 20 DBs, seed 13,
+greedy decoding, commit gate = +3 examples):
 
 | round | 0 (baseline) | 1 | 2 | 3 |
 |------|------|------|------|------|
-| execution accuracy | 60% (CI 50–69) | **77%** (CI 68–84) | 77% | 77% |
+| flash | 65% (CI 55–74) | 75% | 75% | **79%** (CI 70–86) |
+| pro   | 63% (CI 53–72) | 75% | 75% | **78%** (CI 70–86) |
 
-The weaker model gains **+17%** from self-improvement and nearly catches a stronger
-model (DeepSeek-pro: 67 → 79). Improvement comes from *transferable* learned rules /
-retrieved few-shots, so it generalizes across databases.
+Both models gain **+14–15%** and end statistically tied (differences within the 95% CIs).
+The commit gate **correctly rejects the round-2 candidate** (+1–2 examples = noise) in both
+runs, so the curve rises only on *meaningful* wins. Gains come from *transferable* learned
+rules / retrieved few-shots, so they generalize across databases. Cost: ~3.5k tokens /
+generation (grows ~30% as the prompt accumulates rules/few-shots).
 
 ## Architecture
 
 ![SQLoop architecture](docs/architecture.svg)
 
-- **Dataset / metric**: Spider; execution accuracy (compare result sets of predicted vs gold SQL).
-- **Self-improvement extras**: history memory (adaptive hybrid retrieval), real schema linking, ReAct repair with a loop guard, rigorous eval with confidence intervals.
+- **Dataset / metric**: Spider; execution accuracy (result-set match, column-order-insensitive, 95% CI).
+- **Task plane**: heuristic/LLM router, schema linking with **value linking**, single-pass generation, conditional ReAct repair (error / empty / LLM self-check) with a loop guard, optional history memory.
+- **Improvement plane**: MCP-grounded failure analysis → additive prompt/few-shot candidates → validation ranking → held-out A/B with a **commit-if-better significance gate**; each round logged to Phoenix Experiments.
 
 ## Quickstart
 
@@ -96,22 +101,50 @@ both connections at once.
 
 ## Project layout
 
+Flat `sqloop/` package, grouped by role — the two planes from the architecture above:
+
 ```
-sqloop/
-  agent.py          task pipeline (build_pipeline); Gemini/DeepSeek backend switch
-  schema_linker.py  + schema_link.py   relevant-table retrieval (+FK closure)
+Task plane  (answer a question):
+  agent.py          pipeline (build_pipeline) + Gemini/DeepSeek backend switch
+  router.py         intent router: heuristic (no-LLM) or LLM
+  schema_link.py    relevant-table retrieval (+FK closure, value linking)
+  schema_linker.py  ADK agent wrapper for the above
   db.py             SQLite executor (execute_sql tool)
-  repair.py         conditional ReAct repair step
+  repair.py         conditional ReAct repair (error / empty / LLM self-check)
+  prompts.py        agent instructions
   memory.py         history memory: reuse + adaptive hybrid retrieval
-  optimizer.py      Optimizer: Phoenix MCP fetch + failure-mode analysis
+
+Improvement plane  (improve the agent):
+  optimizer.py      Phoenix MCP fetch + failure-mode analysis (+ report distill)
   propose.py        candidate-pool proposer (GEPA/MIPRO-style, additive)
-  loop.py           one self-improvement round
-  eval.py           Spider-style execution match + Wilson CI
+  loop.py           one round: reflect → propose → rank → A/B → commit-if-better
   config.py         swappable GeneratorConfig (prompt + few-shots)
+
+Eval / observability:
+  eval.py           Spider-style execution match + Wilson CI + commit gate
+  experiment.py     log each round to Phoenix Experiments
+  spider.py         Spider dataset access
+  throttle.py       rate-limit backoff
   instrumentation.py  Phoenix tracing setup
-main.py  run_eval.py  run_experiment.py  run_optimizer.py  run_improve.py  run_loop.py
-build_memory.py  app.py  seed_db.py
+
+Drivers:  main.py  run_eval.py  run_experiment.py  run_optimizer.py
+          run_improve.py  run_loop.py  build_memory.py  app.py  seed_db.py
 ```
+
+### Configuration (env switches)
+
+All optional, with safe defaults — batch-eval / serve behaviour is tunable without code changes.
+
+| switch | default | effect |
+|--------|---------|--------|
+| `LLM_BACKEND` | `gemini` | `deepseek` routes via LiteLLM (dev validation only) |
+| `SQLOOP_ROUTER` | `llm` | `heuristic`/`skip` drop the per-turn router LLM call (~⅓ of calls); the loop defaults to `heuristic` |
+| `SQLOOP_REPAIR` | `basic` | `empty` adds empty-result repair; `verify` adds an LLM result self-check |
+| `SQLOOP_SCHEMA_VALUES` | `on` | value linking (sampled cell values fold into table scoring) |
+| `SQLOOP_COMMIT_RULE` / `_MIN_GAIN` | `margin` / `3` | commit gate: candidate must win by ≥N held-out examples (`strict` = old single-point) |
+| `SQLOOP_PROPOSE_DEMOS` | `on` | `off` lets History Memory own the few-shot lane (no duplication) |
+| `SQLOOP_PHOENIX_EXPERIMENTS` | `off` | `on` logs each round's curve point to Phoenix Experiments |
+| `SQLOOP_OPTIMIZER_LIVE` | `off` | `on` fetches the failure report live via MCP each loop |
 
 ## License
 
