@@ -86,6 +86,7 @@ async def run_round(
     val_examples: list[dict],
     held_examples: list[dict],
     incumbent_held_acc: float | None = None,
+    incumbent_held_rows: list[dict] | None = None,
     use_llm: bool = True,
     k: int = 4,
     failure_report: str | None = None,
@@ -113,9 +114,16 @@ async def run_round(
     ranked.sort(key=lambda t: (-t[0], t[1]))  # best accuracy, then shorter prompt
     best = ranked[0][2]
 
-    if incumbent_held_acc is None:
-        incumbent_held_acc = await eval_accuracy(incumbent, held_examples)
-    cand_held_acc = await eval_accuracy(best, held_examples)
+    # Keep per-example held rows so run_loop can log them to Phoenix (#6) without a
+    # re-eval. accuracy() of these rows == the old eval_accuracy(), so numbers are
+    # unchanged.
+    if incumbent_held_rows is not None:
+        incumbent_held_acc = accuracy(incumbent_held_rows)
+    elif incumbent_held_acc is None:
+        incumbent_held_rows = await eval_rows(incumbent, held_examples)
+        incumbent_held_acc = accuracy(incumbent_held_rows)
+    cand_held_rows = await eval_rows(best, held_examples)
+    cand_held_acc = accuracy(cand_held_rows)
 
     # Commit only on a meaningful gain, not single-point noise (see eval.should_commit).
     rule = os.environ.get("SQLOOP_COMMIT_RULE", "margin")
@@ -133,5 +141,6 @@ async def run_round(
         "commit_rule": f"{rule}(min_gain={min_gain})" if rule == "margin" else rule,
         "new_incumbent": best if committed else incumbent,
         "new_held_acc": cand_held_acc if committed else incumbent_held_acc,
+        "new_held_rows": cand_held_rows if committed else incumbent_held_rows,
         "notes": best.notes,
     }

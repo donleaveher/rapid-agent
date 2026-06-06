@@ -126,7 +126,11 @@
   - 用 Phoenix annotations 存 `execution_accuracy`；
   - 曲线直接在 Phoenix Experiments UI 看（dashboard 可嵌链接）。
   - 注意：批量落库会增加网络/配额压力，与已知代理不稳的坑权衡；可只在正式 Vertex 跑时开。
-- **状态**：⬜ 未开始。
+- **状态**：✅ 已完成。`sqloop/experiment.py`：每轮 held 评测作为一个 Phoenix experiment
+  落在共享 held dataset 上，`execution_accuracy` 作 evaluator/annotation；多轮 = UI 里递增曲线。
+  **零额外 LLM**——用"查表 task"喂 loop 已算出的 `pred_sql`（不重跑 pipeline），evaluator 只重执行 SQL。
+  `run_round` 返回 `new_held_rows`、`run_loop` 携带并逐轮记录。**默认关**（`SQLOOP_PHOENIX_EXPERIMENTS=on`）
+  且全程 best-effort（Phoenix 抖动不拖垮 loop）。已 live 验证：dataset + 两个 experiment 成功落库可见。
 
 ---
 

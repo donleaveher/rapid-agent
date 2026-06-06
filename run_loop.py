@@ -41,8 +41,9 @@ os.environ.setdefault("SQLOOP_ROUTER", "heuristic")
 
 from sqloop.config import ACTIVE_PATH, baseline_config
 from sqloop.eval import wilson_ci
+from sqloop.experiment import log_round, make_held_dataset, phoenix_enabled
 from sqloop.instrumentation import flush_tracing, setup_tracing
-from sqloop.loop import eval_accuracy, run_round
+from sqloop.loop import accuracy, eval_rows, run_round
 from sqloop.optimizer import build_failure_report, latest_saved_report
 from sqloop.spider import dev_examples
 
@@ -104,17 +105,31 @@ async def main_async(rounds: int, use_llm: bool, preset: str) -> None:
           f"| dbs={n_dbs} | rounds={rounds}")
 
     incumbent = baseline_config()
-    held_acc = await eval_accuracy(incumbent, held)
+    held_rows = await eval_rows(incumbent, held)          # keep rows for optional Phoenix log
+    held_acc = accuracy(held_rows)
     lo, hi = wilson_ci(round(held_acc * len(held)), len(held))
     print(f"\n[round 0] baseline held-out accuracy = {held_acc:.1%}  (95% CI {lo:.0%}-{hi:.0%})")
     curve = [_point(0, held_acc, len(held), True, "baseline")]
     rounds_log = []
 
+    # Optional: log each round's held-out eval to Phoenix Experiments (#6), no extra
+    # LLM (precomputed preds). Best-effort -- never break the loop.
+    ph_dataset = None
+    if phoenix_enabled():
+        try:
+            ph_dataset = await make_held_dataset(held, tag=f"{preset}-")
+            url = await log_round(ph_dataset, 0, held_rows, "baseline")
+            print(f"[phoenix] round 0 experiment -> {url}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[phoenix] logging disabled (error: {exc})")
+            ph_dataset = None
+
     for r in range(1, rounds + 1):
         print(f"\n===== round {r} =====")
         res = await run_round(
             incumbent, reflect_examples=reflect, val_examples=val, held_examples=held,
-            incumbent_held_acc=held_acc, use_llm=use_llm, failure_report=failure_report,
+            incumbent_held_acc=held_acc, incumbent_held_rows=held_rows,
+            use_llm=use_llm, failure_report=failure_report,
         )
         print(f"  reflect acc={res['reflect_acc']:.1%} | validation={res['validation']} "
               f"-> selected {res['selected']}")
@@ -123,6 +138,13 @@ async def main_async(rounds: int, use_llm: bool, preset: str) -> None:
               f"[gate: {res['commit_rule']}]")
         incumbent = res["new_incumbent"]
         held_acc = res["new_held_acc"]
+        held_rows = res["new_held_rows"]
+        if ph_dataset is not None:
+            try:
+                url = await log_round(ph_dataset, r, held_rows, res["selected"])
+                print(f"[phoenix] round {r} experiment -> {url}")
+            except Exception as exc:  # noqa: BLE001
+                print(f"[phoenix] round {r} log failed: {exc}")
         curve.append(_point(r, held_acc, len(held), res["committed"], res["selected"]))
         rounds_log.append({"round": r, **{k: res[k] for k in
                           ("reflect_acc", "validation", "selected", "incumbent_held_acc",
