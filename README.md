@@ -15,19 +15,21 @@ Gemini, OpenInference tracing to Phoenix, and the Phoenix MCP server.
 - **Deep tracing + MCP**: every Router/Schema-Linker/Generator/Executor/Repair step is a Phoenix span; the Optimizer pulls its own experiment results back *via MCP*.
 - **Evidence, not vibes**: Spider-style execution accuracy with 95% confidence intervals, and a **significance gate** so single-point noise never gets committed.
 
-Self-improvement result (DeepSeek dev validation, 100 held-out questions / 20 DBs, seed 13,
-greedy decoding, commit gate = +3 examples):
+Self-improvement result — **Gemini on Vertex** (the submission backend), 100 held-out
+questions / 20 DBs, seed 13, greedy decoding, commit gate = +3 examples:
 
-| round | 0 (baseline) | 1 | 2 | 3 |
-|------|------|------|------|------|
-| flash | 65% (CI 55–74) | 75% | 75% | **79%** (CI 70–86) |
-| pro   | 63% (CI 53–72) | 75% | 75% | **78%** (CI 70–86) |
+| round | 0 (baseline) | 1 | 2 | 3 | gain |
+|------|------|------|------|------|------|
+| **gemini-3.5-flash** (weak) | 60% (CI 50–69) | **77%** (CI 68–84) | 77% | 77% | **+17%** |
+| gemini-3.1-pro (strong) | 87% (CI 79–92) | 87% | 87% | 87% | +0% |
 
-Both models gain **+14–15%** and end statistically tied (differences within the 95% CIs).
-The commit gate **correctly rejects the round-2 candidate** (+1–2 examples = noise) in both
-runs, so the curve rises only on *meaningful* wins. Gains come from *transferable* learned
-rules / retrieved few-shots, so they generalize across databases. Cost: ~3.5k tokens /
-generation (grows ~30% as the prompt accumulates rules/few-shots).
+The weak model gains **+17%** from self-improvement. The strong model is already near the
+ceiling (87% baseline), so there's little headroom — and the **commit gate honestly commits
+nothing** (its round-1 candidate is +2 examples, below the +3 significance bar) instead of
+faking a rise. That's the point: the gains are real and measured, not noise. Improvement
+comes from *transferable* learned rules / retrieved few-shots, so it generalizes across
+databases. Cross-checked on DeepSeek (dev): flash 65→79 (+14%), pro 63→78 (+15%) — same
+pattern.
 
 ## Architecture
 

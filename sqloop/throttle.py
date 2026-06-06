@@ -4,8 +4,14 @@ from __future__ import annotations
 
 import re
 
-# Transient upstream errors worth retrying (503 high demand, 429 rate limit).
-RETRYABLE = ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED")
+# Transient errors worth retrying: upstream load/limits (503/429) AND connection-level
+# flakiness (proxy hiccups when calling Vertex/Phoenix through a local proxy).
+RETRYABLE = (
+    "503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "502", "504", "500", "INTERNAL",
+    "ConnectError", "ConnectTimeout", "ReadTimeout", "Read timed out",
+    "Connection refused", "Connection reset", "RemoteProtocolError",
+    "ServerDisconnected", "peer closed connection",
+)
 
 
 def is_retryable(msg: str) -> bool:

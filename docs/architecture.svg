@@ -36,7 +36,7 @@
     <rect x="468" y="178" width="152" height="46" rx="8" fill="#8b5cf6"/>
     <text x="544" y="197" font-weight="600">History Memory</text><text x="544" y="212">reuse · retrieval few-shots</text>
     <rect x="636" y="178" width="120" height="46" rx="8" fill="#f59e0b"/>
-    <text x="696" y="197" font-weight="600">Repair (ReAct)</text><text x="696" y="212">on SQL error</text>
+    <text x="696" y="197" font-weight="600">Repair (ReAct)</text><text x="696" y="212">error · empty · check</text>
   </g>
   <g stroke="#8b5cf6" stroke-width="2" marker-end="url(#arr)" fill="none"><path d="M544,178 L544,152"/></g>
   <g stroke="#f59e0b" stroke-width="2" marker-end="url(#arr)" fill="none"><path d="M692,150 L692,176"/></g>
@@ -71,27 +71,27 @@
   <g stroke="#0e7490" stroke-width="2" marker-end="url(#arrL)" fill="none"><path d="M115,316 L115,390"/></g>
   <text x="128" y="331" font-size="11" fill="#0e7490">MCP: read own failures</text>
 
-  <!-- rising accuracy curve: flash vs pro (zoomed y-axis 50%..85% for contrast) -->
+  <!-- rising accuracy curve: Gemini flash vs pro (y-axis 50%..90%) -->
   <g>
     <rect x="400" y="474" width="440" height="120" rx="8" fill="#ffffff" stroke="#a7f3d0"/>
-    <text x="416" y="492" font-size="12" font-weight="700" fill="#065f46">Execution accuracy ↑ (held-out · 100 q / 20 DBs)</text>
+    <text x="416" y="492" font-size="12" font-weight="700" fill="#065f46">Execution accuracy ↑ (Gemini · held-out 100 q / 20 DBs)</text>
     <!-- legend -->
     <line x1="416" y1="506" x2="438" y2="506" stroke="#059669" stroke-width="3"/><text x="442" y="510" font-size="10" fill="#065f46">flash (weak) +17%</text>
-    <line x1="566" y1="506" x2="588" y2="506" stroke="#f59e0b" stroke-width="3"/><text x="592" y="510" font-size="10" fill="#b45309">pro (strong) +12%</text>
-    <!-- axes + y ticks (50%..85%) -->
+    <line x1="566" y1="506" x2="588" y2="506" stroke="#f59e0b" stroke-width="3"/><text x="592" y="510" font-size="10" fill="#b45309">pro (strong) +0% · near ceiling</text>
+    <!-- axes + y ticks (50%..90%) -->
     <line x1="452" y1="522" x2="452" y2="582" stroke="#94a3b8"/>
     <line x1="452" y1="582" x2="820" y2="582" stroke="#94a3b8"/>
-    <text x="446" y="525" font-size="9" fill="#94a3b8" text-anchor="end">85%</text>
+    <text x="446" y="525" font-size="9" fill="#94a3b8" text-anchor="end">90%</text>
     <text x="446" y="585" font-size="9" fill="#94a3b8" text-anchor="end">50%</text>
-    <!-- flash: 60,77,77,77 -->
-    <polyline points="472,565 568,536 664,536 760,536" fill="none" stroke="#059669" stroke-width="3"/>
-    <g fill="#059669"><circle cx="472" cy="565" r="3.5"/><circle cx="568" cy="536" r="3.5"/><circle cx="664" cy="536" r="3.5"/><circle cx="760" cy="536" r="3.5"/></g>
-    <!-- pro: 67,76,78,79 -->
-    <polyline points="472,553 568,537 664,534 760,532" fill="none" stroke="#f59e0b" stroke-width="3"/>
-    <g fill="#f59e0b"><circle cx="472" cy="553" r="3.5"/><circle cx="568" cy="537" r="3.5"/><circle cx="664" cy="534" r="3.5"/><circle cx="760" cy="532" r="3.5"/></g>
+    <!-- flash: 60,77,77,77 (climbs) -->
+    <polyline points="472,567 568,542 664,542 760,542" fill="none" stroke="#059669" stroke-width="3"/>
+    <g fill="#059669"><circle cx="472" cy="567" r="3.5"/><circle cx="568" cy="542" r="3.5"/><circle cx="664" cy="542" r="3.5"/><circle cx="760" cy="542" r="3.5"/></g>
+    <!-- pro: 87,87,87,87 (flat, already near ceiling) -->
+    <polyline points="472,527 568,527 664,527 760,527" fill="none" stroke="#f59e0b" stroke-width="3"/>
+    <g fill="#f59e0b"><circle cx="472" cy="527" r="3.5"/><circle cx="568" cy="527" r="3.5"/><circle cx="664" cy="527" r="3.5"/><circle cx="760" cy="527" r="3.5"/></g>
     <!-- end values + x ticks -->
-    <text x="768" y="540" font-size="10" fill="#059669" font-weight="700">77</text>
-    <text x="768" y="528" font-size="10" fill="#b45309" font-weight="700">79</text>
+    <text x="768" y="547" font-size="10" fill="#059669" font-weight="700">77</text>
+    <text x="768" y="523" font-size="10" fill="#b45309" font-weight="700">87</text>
     <text x="472" y="594" font-size="9" fill="#475569" text-anchor="middle">r0</text>
     <text x="760" y="594" font-size="9" fill="#475569" text-anchor="middle">r3</text>
   </g>
