@@ -71,7 +71,12 @@
   - 一个轻量 LLM 自检"这个结果回答了问题吗？"（cross-check question vs result）；
   - 注意成本：自检是每题额外调用，需与 #4（省配额）权衡，或仅在 eval 外的 serve 模式开。
   - 防死循环硬上限 `SQLOOP_MAX_LLM_CALLS` 已在，扩触发不会跑飞。
-- **状态**：⬜ 未开始。
+- **状态**：✅ 已完成。分层触发单一开关 `SQLOOP_REPAIR=basic|empty|verify`（默认 `basic`=旧行为）：
+  `basic` 只 SQL_ERROR；`empty` +空结果（确定性、免费）；`verify` +LLM 自检（`repair.py::_verify_answer`，
+  抓 WRONG_COLUMN/AGGREGATION 等执行不报错的语义错，每题 +1 调用，opt-in）。
+  `REPAIR_INSTRUCTION` 改用 `{repair_reason}` 同时支持语法/语义修复；触发原因写 `state["repair_reason"]`。
+  已验证：确定性触发矩阵全对；live 自检正确区分（正确→OK、错误→精准 FIX 理由）；verify 模式端到端不崩。
+  ⚠️ 与 #4 成本权衡：verify 仅 serve/demo 开；是否净提分需测（存在误报把正确答案改坏的风险）。
 
 ---
 

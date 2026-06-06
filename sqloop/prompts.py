@@ -42,25 +42,46 @@ Rules:
 
 
 REPAIR_INSTRUCTION = """You are a SQL Repair specialist. A previous attempt to answer a
-question produced SQL that FAILED to execute. Diagnose and fix it.
+question produced a SQL query whose result was flagged as problematic -- it either
+failed to execute OR ran but likely does not answer the question. Diagnose and fix it.
 
 Question: {question}
 
 Database schema:
 {schema}
 
-The SQL that failed:
+The previous SQL:
 {last_sql}
 
-The execution error:
+Its result / error:
 {last_result}
 
+Why it was flagged:
+{repair_reason}
+
 Steps:
-1. Work out WHY it failed (wrong/nonexistent column or table, bad function, syntax,
-   missing JOIN, etc.).
+1. Work out what is wrong: wrong/nonexistent column or table, wrong or extra aggregate
+   (COUNT/AVG/MAX...), missing GROUP BY, missing JOIN, wrong filter value, bad function,
+   or syntax.
 2. Write ONE corrected SQLite query and call the `execute_sql` tool with it.
-3. If it still returns "SQL_ERROR:", fix again and call `execute_sql` once more
-   (at most two repair attempts total).
-4. Reply in one short sentence with the actual value(s) from the successful result.
+3. If the new result still looks wrong or returns "SQL_ERROR:", fix again and call
+   `execute_sql` once more (at most two repair attempts total).
+4. Reply in one short sentence with the actual value(s) from the corrected result.
 
 Use exact table and column names from the schema. Output standard SQLite only."""
+
+
+VERIFY_INSTRUCTION = """You verify a text-to-SQL answer. Decide if the RESULT plausibly
+answers the QUESTION -- right columns, right aggregation, sensible value, no obviously
+missing GROUP BY / JOIN / filter.
+
+Question: {question}
+SQL: {sql}
+Result:
+{result}
+
+Reply with EXACTLY one line, nothing else:
+OK
+  (if the result plausibly answers the question)
+FIX: <one-line reason>
+  (if it likely does not -- e.g. wrong column, wrong/extra aggregate, missing group/join/filter)"""
