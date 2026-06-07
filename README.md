@@ -1,5 +1,9 @@
 # 🔁 SQLoop — a self-improving text-to-SQL agent
 
+**▶️ Live demo — <https://sqloop-448803070690.us-central1.run.app>**
+Running on Google Cloud Run (Vertex AI · `gemini-3.5-flash`), fully traced to Arize Phoenix.
+_First load may take up to ~1 min if the instance is cold._
+
 SQLoop turns natural-language questions into SQL **and improves itself**. It isn't
 just "NL → SQL": an Optimizer reads the agent's *own* execution traces through the
 **Arize Phoenix MCP server**, clusters its failure modes, proposes prompt / few-shot
