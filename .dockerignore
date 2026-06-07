@@ -1,0 +1,31 @@
+# NOTE: the real deploy builds from the slim ./deploy.sh staging dir (.deploy/),
+# which already contains only the 20 Spider dev DBs. This file is a safety net so
+# that an accidental `docker build .` / `gcloud run deploy --source .` at the repo
+# root never uploads the full 1.7G dataset or any secrets.
+
+# --- build hygiene ---
+.git
+.gitignore
+.venv/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.vscode/
+.claude/
+.python-version
+.deploy/
+
+# --- secrets: never bake into an image ---
+.env
+
+# --- dev-only docs (not needed at runtime) ---
+PROGRESS.md
+CLAUDE.md
+IMPROVEMENTS.md
+DEPLOY.md
+
+# --- heavy / irrelevant data (the dashboard only needs the 20 dev DBs) ---
+# deploy.sh stages those into .deploy/; a root build intentionally ships none.
+data/spider/
+data/eval_runs/
+data/*.db

@@ -175,4 +175,8 @@ with gr.Blocks(title="SQLoop") as demo:
 
 
 if __name__ == "__main__":
-    demo.launch(server_name="127.0.0.1", server_port=7860)
+    # Bind 0.0.0.0 and read $PORT so the same image runs locally and on Cloud Run
+    # (Cloud Run injects PORT=8080). Falls back to 7860 for local `uv run`.
+    import os
+
+    demo.launch(server_name="0.0.0.0", server_port=int(os.environ.get("PORT", "7860")))
