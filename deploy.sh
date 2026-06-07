@@ -75,8 +75,9 @@ cp data/optimizer_reports/*.md .deploy/data/optimizer_reports/ 2>/dev/null || tr
 echo "   context size: $(du -sh .deploy | cut -f1)  ($(find .deploy/data/spider/database -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ') dev DBs)"
 
 # ---- 3. deploy to Cloud Run -------------------------------------------------
-# Common env vars.
-ENV_VARS="PHOENIX_COLLECTOR_ENDPOINT=${PHOENIX_ENDPOINT},PHOENIX_PROJECT_NAME=rapid-agent,SQLOOP_CONFIG=${SQLOOP_CONFIG}"
+# Common env vars. Phoenix endpoint is added below, ONLY when its key secret
+# exists -- setting the endpoint without the key 401s on every span export.
+ENV_VARS="SQLOOP_CONFIG=${SQLOOP_CONFIG}"
 SECRETS=""
 
 case "$BACKEND" in
@@ -91,11 +92,15 @@ case "$BACKEND" in
   *) echo "ERROR: BACKEND must be 'vertex' or 'aistudio'." >&2; exit 1 ;;
 esac
 
-# Add Phoenix secret only if it exists (tracing is optional; the app boots without it).
+# Wire up Phoenix tracing ONLY when the api_key secret exists. Endpoint + key go
+# together: setting the endpoint without the key makes every span batch 401 (see
+# CLAUDE.md trap #2). With the secret absent we leave all Phoenix env unset, so
+# setup_tracing() sees no endpoint and cleanly no-ops (the app still boots).
 if gcloud secrets describe "$PHOENIX_SECRET" --project "$PROJECT" >/dev/null 2>&1; then
+  ENV_VARS="${ENV_VARS},PHOENIX_COLLECTOR_ENDPOINT=${PHOENIX_ENDPOINT},PHOENIX_PROJECT_NAME=rapid-agent"
   SECRETS="${SECRETS:+$SECRETS,}PHOENIX_CLIENT_HEADERS=${PHOENIX_SECRET}:latest"
 else
-  echo "   note: secret '$PHOENIX_SECRET' not found -> deploying without Phoenix tracing."
+  echo "   note: secret '$PHOENIX_SECRET' not found -> deploying with tracing OFF (no Phoenix endpoint set)."
 fi
 
 echo ">> [3/3] deploying '$SERVICE' to Cloud Run ($REGION, project $PROJECT, backend=$BACKEND)"

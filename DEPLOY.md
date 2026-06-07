@@ -10,8 +10,9 @@ gcloud config set project rapid-agent-498122
 gcloud services enable run.googleapis.com cloudbuild.googleapis.com \
   aiplatform.googleapis.com secretmanager.googleapis.com
 
-# (optional) Phoenix tracing secret — the app boots fine without it
-printf 'api_key=%s' "<PHOENIX_KEY>" | \
+# (recommended) Phoenix tracing secret — derive the full "api_key=..." header
+# straight from .env so you never paste the key by hand (see Tracing section):
+printf '%s' "$(grep '^PHOENIX_CLIENT_HEADERS=' .env | cut -d= -f2-)" | \
   gcloud secrets create sqloop-phoenix --data-file=- --replication-policy=automatic
 
 ./deploy.sh           # vertex backend (submission default)
@@ -59,11 +60,28 @@ Cloud Build can't reach.
   BACKEND=aistudio ./deploy.sh
   ```
 
-## Tracing (optional)
+## Tracing (recommended)
 
-If the `sqloop-phoenix` secret exists, `PHOENIX_CLIENT_HEADERS` is wired up and every
-turn traces to Phoenix Cloud. If it's missing, `deploy.sh` says so and deploys without
-tracing — the app still works (see `instrumentation.setup_tracing()`: no endpoint → no-op).
+Tracing is the core of the Arize-track story, so you almost certainly want it on: with
+the secret present, every Router → Schema-Linker → Generator → Executor → Repair step of
+a live "Ask" turn streams to Phoenix Cloud. Without it the app still boots and the
+dashboard (including the self-improvement curve, which renders baked-in artifacts) works —
+live turns just aren't traced.
+
+`deploy.sh` mounts the `sqloop-phoenix` secret into `PHOENIX_CLIENT_HEADERS` if it exists.
+
+**The secret must hold the FULL header value `api_key=<key>`** — not the bare key — because
+the app parses `api_key=` out of `PHOENIX_CLIENT_HEADERS` (`instrumentation._api_key_from_env`).
+
+- Easiest (no manual key handling): the TL;DR command above pipes the exact value out of `.env`.
+- By hand: `printf 'api_key=%s' "<BARE_KEY>"` — put **only** the raw key in the placeholder;
+  the `api_key=` prefix is added for you, so don't paste `api_key=...` or you'll double it.
+
+Verify the format (prints `api_key=`, not the secret itself):
+
+```bash
+gcloud secrets versions access latest --secret=sqloop-phoenix | head -c 8
+```
 
 ## Knobs
 
