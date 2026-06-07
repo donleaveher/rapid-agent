@@ -113,8 +113,9 @@ gcloud secrets versions access latest --secret=sqloop-phoenix | head -c 8
 | `REGION`         | `us-central1`                    | Cloud Run + Vertex region              |
 | `SERVICE`        | `sqloop`                         | Cloud Run service name                 |
 | `BACKEND`        | `vertex`                         | `vertex` \| `aistudio`                 |
+| `GEMINI_MODEL`   | `gemini-2.5-flash` (vertex)      | must exist on Vertex here; `gemini-3.5-flash` 404s |
 | `SQLOOP_CONFIG`  | `data/configs/active.vertex.json`| committed config the live pipeline uses|
-| `GCP_PROJECT`    | `gcloud config` project          | target project                         |
+| `GCP_PROJECT`    | `rapid-agent-498122`             | target project                         |
 
 ## Cold starts
 

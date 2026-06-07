@@ -83,7 +83,10 @@ SECRETS=""
 case "$BACKEND" in
   vertex)
     # Vertex uses the runtime service account (ADC) — no API key needed.
-    ENV_VARS="${ENV_VARS},GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_PROJECT=${PROJECT},GOOGLE_CLOUD_LOCATION=${REGION}"
+    # GEMINI_MODEL must name a model available on Vertex in this region: the code
+    # default (gemini-flash-lite-latest) and gemini-3.5-flash both 404 on Vertex;
+    # gemini-2.5-flash is verified working here. Override via GEMINI_MODEL env.
+    ENV_VARS="${ENV_VARS},GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_PROJECT=${PROJECT},GOOGLE_CLOUD_LOCATION=${REGION},GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}"
     ;;
   aistudio)
     ENV_VARS="${ENV_VARS},GOOGLE_GENAI_USE_VERTEXAI=FALSE,GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.5-flash}"
