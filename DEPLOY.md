@@ -43,9 +43,8 @@ Cloud Build can't reach.
 - **No API key.** Vertex authenticates via the Cloud Run runtime service account (ADC).
   Grant it once:
   ```bash
-  PROJECT=$(gcloud config get-value project)
-  NUM=$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')
-  gcloud projects add-iam-policy-binding "$PROJECT" \
+  NUM=$(gcloud projects describe rapid-agent-498122 --format='value(projectNumber)')
+  gcloud projects add-iam-policy-binding rapid-agent-498122 \
     --member="serviceAccount:${NUM}-compute@developer.gserviceaccount.com" \
     --role="roles/aiplatform.user"
   ```
