@@ -123,14 +123,18 @@ gcloud secrets versions access latest --secret=sqloop-phoenix | head -c 8
 
 ## Cold starts
 
-The image is large (Phoenix + ADK + Gradio + scipy/sklearn). With `min-instances=0`
-the first hit after idle is ~15–30 s. For live judging, keep one warm:
+The image is large (Phoenix + ADK + Gradio + scipy/sklearn), so a cold start measures
+**~70 s**. With `min-instances=0` that hits the first visitor after any idle period. For
+live judging, keep one instance warm using the toggle script:
 
 ```bash
-gcloud run services update sqloop --region us-central1 --min-instances=1
+./scripts/warm.sh on      # min-instances=1  (judging window)
+./scripts/warm.sh off     # back to scale-to-zero (default; stops idle cost)
+./scripts/warm.sh status  # show current min-instances
 ```
 
-(Costs a bit while idle — turn it back to 0 afterwards.)
+A warm instance **bills continuously while idle**, so flip it `on` right before judging
+and `off` right after — don't leave it on for days.
 
 ## Re-deploy
 
