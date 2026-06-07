@@ -10,6 +10,9 @@ wheels/
 .venv
 .env
 
+# Editor
+.vscode/
+
 # Local data (generated SQLite dbs, Spider downloads, eval/loop artifacts)
 data/*.db
 data/spider/
