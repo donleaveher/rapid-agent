@@ -31,7 +31,8 @@ cd "$(dirname "$0")"
 
 # ---- config (override via env) ---------------------------------------------
 PROJECT="${GCP_PROJECT:-rapid-agent-498122}"
-REGION="${REGION:-us-central1}"
+REGION="${REGION:-us-central1}"        # Cloud Run region (independent of Vertex)
+VERTEX_LOCATION="${VERTEX_LOCATION:-global}"  # Vertex model location; gemini-3.5-flash is served from `global`, not us-central1
 SERVICE="${SERVICE:-sqloop}"
 BACKEND="${BACKEND:-vertex}"            # vertex | aistudio
 PHOENIX_ENDPOINT="${PHOENIX_ENDPOINT:-https://app.phoenix.arize.com/s/c2303372901}"
@@ -82,11 +83,12 @@ SECRETS=""
 
 case "$BACKEND" in
   vertex)
-    # Vertex uses the runtime service account (ADC) — no API key needed.
-    # GEMINI_MODEL must name a model available on Vertex in this region: the code
-    # default (gemini-flash-lite-latest) and gemini-3.5-flash both 404 on Vertex;
-    # gemini-2.5-flash is verified working here. Override via GEMINI_MODEL env.
-    ENV_VARS="${ENV_VARS},GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_PROJECT=${PROJECT},GOOGLE_CLOUD_LOCATION=${REGION},GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}"
+    # Vertex auth via the Cloud Run runtime service account (ADC) — no API key.
+    # GOOGLE_CLOUD_LOCATION (Vertex) is INDEPENDENT of the Cloud Run REGION: the
+    # submission model gemini-3.5-flash is served from location=global, not
+    # us-central1 (where it 404s). The code default (gemini-flash-lite-latest)
+    # also 404s on Vertex. Override either via VERTEX_LOCATION / GEMINI_MODEL.
+    ENV_VARS="${ENV_VARS},GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_PROJECT=${PROJECT},GOOGLE_CLOUD_LOCATION=${VERTEX_LOCATION},GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.5-flash}"
     ;;
   aistudio)
     ENV_VARS="${ENV_VARS},GOOGLE_GENAI_USE_VERTEXAI=FALSE,GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.5-flash}"

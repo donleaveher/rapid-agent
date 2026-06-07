@@ -47,7 +47,10 @@ Cloud Build can't reach.
 ## Backends
 
 ### Vertex (submission default — `./deploy.sh`)
-- Sets `GOOGLE_GENAI_USE_VERTEXAI=TRUE`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`.
+- Sets `GOOGLE_GENAI_USE_VERTEXAI=TRUE`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`
+  (=`VERTEX_LOCATION`, default `global`), and `GEMINI_MODEL` (default `gemini-3.5-flash`).
+  The Vertex location is **independent of the Cloud Run region**: gemini-3.5-flash is only
+  served from `global`, so don't set it to `us-central1` (it 404s there).
 - **No API key.** Vertex authenticates via the Cloud Run runtime service account (ADC).
   Grant it once:
   ```bash
@@ -113,7 +116,8 @@ gcloud secrets versions access latest --secret=sqloop-phoenix | head -c 8
 | `REGION`         | `us-central1`                    | Cloud Run + Vertex region              |
 | `SERVICE`        | `sqloop`                         | Cloud Run service name                 |
 | `BACKEND`        | `vertex`                         | `vertex` \| `aistudio`                 |
-| `GEMINI_MODEL`   | `gemini-2.5-flash` (vertex)      | must exist on Vertex here; `gemini-3.5-flash` 404s |
+| `GEMINI_MODEL`   | `gemini-3.5-flash` (vertex)      | the submission model; served from Vertex `global` |
+| `VERTEX_LOCATION`| `global`                         | Vertex model location, **independent of `REGION`**; gemini-3.5-flash 404s on `us-central1` |
 | `SQLOOP_CONFIG`  | `data/configs/active.vertex.json`| committed config the live pipeline uses|
 | `GCP_PROJECT`    | `rapid-agent-498122`             | target project                         |
 
