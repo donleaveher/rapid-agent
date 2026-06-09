@@ -148,9 +148,15 @@ with gr.Blocks(title="SQLoop") as demo:
         with gr.Accordion("Database schema", open=False):
             schema_out = gr.Code(value=schema_text(DEFAULT_DB), language="sql")
         gr.Examples(
+            # 1st reuses from memory (shows the 🧠 cache, skips generation -> no trace);
+            # 2nd is phrased to MISS memory so it runs the full pipeline -> real Phoenix trace.
             [["How many singers do we have?", "concert_singer"],
-             ["What are the names and release years for all the songs of the youngest singer?", "concert_singer"]],
-            inputs=[q_in, db_in])
+             ["Show the song names and their release years for the youngest singer.", "concert_singer"]],
+            inputs=[q_in, db_in],
+            outputs=[sql_out, res_out, ans_out, status_out],
+            fn=ask,
+            run_on_click=True,   # click an example -> fill inputs AND run the pipeline
+            cache_examples=False)  # run live on click, don't call the LLM at startup
 
         ask_btn.click(ask, [q_in, db_in], [sql_out, res_out, ans_out, status_out])
         db_in.change(schema_text, db_in, schema_out)

@@ -6,6 +6,12 @@
       "runtimeExecutable": "uv",
       "runtimeArgs": ["run", "python", "app.py"],
       "port": 7860
+    },
+    {
+      "name": "sqloop-deepseek",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "LLM_BACKEND=deepseek uv run python app.py"],
+      "port": 7860
     }
   ]
 }
